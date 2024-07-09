@@ -3,7 +3,8 @@ import numpy as np
 import torch
 import time
 import tkinter as tk
-from tkinter import scrolledtext
+from tkinter import scrolledtext, ttk, PhotoImage, Label
+import threading
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
@@ -50,7 +51,9 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         update_text('Error: unrecognized model')
         return
 
-    update_text('Model architecture loaded and initialized.')
+    update_text('Federated Learning Simulation started. Initializing model architecture...' + '\n')
+    update_text('Model architecture loaded and initialized. Starting training process on dataset: ' + args.dataset + '\n')
+    update_plots([], [])
     net_glob.train()
 
     epoch_losses = []
@@ -73,9 +76,9 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
             update_text(f'Client {user} has completed training. Loss: {loss:.4f}')
             if idx < len(idxs_users) - 1:
                 next_client = idxs_users[idx + 1]
-                update_text(f'Sending model from client {user} to client {next_client}')
+                update_text(f'Sending model updates from client {user} to client {next_client}')
             else:
-                update_text('Model returns to server for aggregation')
+                update_text('Model updates returns to server for aggregation')
 
         # Server aggregation
         avg_weights = FedAvg(local_weights)
@@ -100,15 +103,26 @@ def create_gui(args):
     root = tk.Tk()
     root.title('Federated Learning Simulation')
 
+    # Create a scrolled text area widget
     text_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=50, height=10)
     text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+    # Setup for Matplotlib figures
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8))
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.get_tk_widget().pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-    root.after(100, sequential_process, args, text_area, ax1, ax2, fig, canvas)
+
+    # Function to run the learning process
+    def run_learning_process():
+        sequential_process(args, text_area, ax1, ax2, fig, canvas)
+
+    # Start the learning process in a separate thread to keep GUI responsive
+    thread = threading.Thread(target=run_learning_process)
+    thread.start()
+
     root.mainloop()
+
 
 if __name__ == '__main__':
     args = args_parser()
