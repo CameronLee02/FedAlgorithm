@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import time
 import tkinter as tk
-from tkinter import scrolledtext, ttk, PhotoImage, Label
+from tkinter import scrolledtext, ttk, font
 import threading
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -104,7 +104,8 @@ def create_gui(args):
     root.title('Federated Learning Simulation')
 
     # Create a scrolled text area widget
-    text_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=50, height=10)
+    custom_font = font.Font(family="San Francisco", size=16)
+    text_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=50, height=10, font=custom_font)
     text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
     # Setup for Matplotlib figures
