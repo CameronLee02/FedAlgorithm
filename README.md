@@ -1,4 +1,4 @@
-# Source-inference-FL
+# Custom Federated Learning - Series Based Learning
 Forked Repository from SIA project of FL to custom algorithm on Federated Learning.
 
 # Implementation
