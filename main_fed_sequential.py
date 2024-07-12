@@ -23,19 +23,16 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
     def update_plots(epoch_losses, epoch_accuracies):
         ax1.clear()
         ax2.clear()
-
         ax1.plot(epoch_losses, label='Average Loss per Epoch', marker='o')
         ax1.set_title('Training Loss Over Epochs')
         ax1.set_xlabel('Epoch')
         ax1.set_ylabel('Loss')
         ax1.legend()
-
         ax2.plot(epoch_accuracies, label='Accuracy per Epoch', marker='o')
         ax2.set_title('Training Accuracy Over Epochs')
         ax2.set_xlabel('Epoch')
         ax2.set_ylabel('Accuracy')
         ax2.legend()
-
         canvas.draw()
 
     dataset_train, dataset_test, dict_party_user, _ = get_dataset(args)
@@ -51,7 +48,7 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         update_text('Error: unrecognized model')
         return
 
-    update_text('Federated Learning Simulation started. Initializing model architecture...' + '\n')
+    update_text('Federated Learning Simulation started. Initializing model architecture...\n')
     update_text('Model architecture loaded and initialized. Starting training process on dataset: ' + args.dataset + '\n')
     update_plots([], [])
     net_glob.train()
@@ -63,31 +60,33 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         update_text(f'+++ Epoch {iter + 1} starts +++')
         idxs_users = list(range(args.num_users))
         np.random.shuffle(idxs_users)
-        
+
         local_losses = []
         local_weights = []
+
+        aggregated_weights = copy.deepcopy(net_glob.state_dict())  # Start with the initial model weights for aggregation
 
         for idx, user in enumerate(idxs_users):
             update_text(f'Starting training on client {user}')
             local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_party_user[user])
-            w, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
-            local_weights.append(copy.deepcopy(w))
+            local_weights, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
             local_losses.append(loss)
+            
+            # Aggregate weights with the current aggregated weights
+            for key in aggregated_weights.keys():
+                aggregated_weights[key] += local_weights[key]
+            
             update_text(f'Client {user} has completed training. Loss: {loss:.4f}')
             if idx < len(idxs_users) - 1:
                 next_client = idxs_users[idx + 1]
-                update_text(f'Sending model updates from client {user} to client {next_client}')
-            else:
-                update_text('Model updates returns to server for aggregation')
+                update_text(f'Aggregated weights are being sent from Client {user} to Client {next_client}')
 
-        # Server aggregation
-        avg_weights = FedAvg(local_weights)
-        net_glob.load_state_dict(avg_weights)
-        update_text('Server has aggregated the model updates.')
+        # Send the final aggregated weights from the last client back to the server
+        update_text('Final aggregated weights are sent to the server for updating the global model.')
+        net_glob.load_state_dict({key: val / len(idxs_users) for key, val in aggregated_weights.items()})  # Average the weights
 
         net_glob.eval()
         acc_train, _ = test_fun(net_glob, dataset_train, args)
-        acc_test, _ = test_fun(net_glob, dataset_test, args)
         epoch_losses.append(np.mean(local_losses))
         epoch_accuracies.append(acc_train)
 
@@ -98,6 +97,7 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
     exp_details(args)
     update_text('Training complete. Summary of results:')
     update_text(f'Final Training Accuracy: {acc_train:.2f}')
+
 
 def create_gui(args):
     root = tk.Tk()

@@ -1,12 +1,13 @@
-import copy
 import numpy as np
 import torch
 import time
 import tkinter as tk
-from tkinter import scrolledtext, ttk, font
+from tkinter import scrolledtext, font
 import threading
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import tenseal as ts
+import copy
 
 from models.Nets import MLP, Mnistcnn
 from models.Update import LocalUpdate
@@ -14,30 +15,46 @@ from models.test import test_fun
 from utils.dataset import get_dataset, exp_details
 from utils.options import args_parser
 from models.Fed import FedAvg 
-import tenseal as ts
+
+def setup_tenseal_context():
+    """Set up TenSEAL context for CKKS."""
+    context = ts.context(ts.SCHEME_TYPE.CKKS, poly_modulus_degree=16384, coeff_mod_bit_sizes=[60, 40, 40, 60])
+    context.global_scale = 2**40
+    context.generate_galois_keys()
+    return context
 
 def encrypt_weights(weights, context):
-    """Encrypt model weights using the provided TenSEAL context."""
-    encrypted_weights = [ts.ckks_vector(context, weight.tolist()) for weight in weights]
-    return encrypted_weights
+    """Encrypt model weights ensuring uniform vector size, adjust size as needed."""
+    fixed_size = 4096  # Ensure this size fits your model size
+    padded_weights = np.pad(weights, (0, max(0, fixed_size - len(weights))), 'constant', constant_values=(0))
+    return ts.ckks_vector(context, padded_weights)
 
 def decrypt_weights(encrypted_weights, context):
     """Decrypt model weights."""
-    decrypted_weights = [weight.decrypt() for weight in encrypted_weights]
-    return np.array(decrypted_weights)
+    return np.array(encrypted_weights.decrypt())
 
-def he_avg_weights(encrypted_weights):
+def he_avg_weights(encrypted_weights, context):
     """Homomorphically compute the average of encrypted weights."""
-    avg_weights = encrypted_weights[0]
+    if not encrypted_weights:
+        return None
+    # Compute the number of weights
+    n_weights = len(encrypted_weights)
+    if n_weights == 0:
+        return None 
+    # Calculate the reciprocal of the number of weights
+    reciprocal = 1.0 / n_weights  
+    # Initialize the total with the first encrypted vector scaled by the reciprocal
+    total = encrypted_weights[0] * reciprocal
+    # Accumulate the rest of the weights scaled by the reciprocal
     for weights in encrypted_weights[1:]:
-        avg_weights += weights
-    avg_weights = avg_weights / len(encrypted_weights)
-    return avg_weights
+        total += weights * reciprocal
+    return total
 
-def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
+
+def sequential_process(args, text_widget, ax1, ax2, fig, canvas, context):
     def update_text(message):
         text_widget.insert(tk.END, message + '\n')
-        text_widget.see(tk.END)  # Auto-scroll to the end
+        text_widget.see(tk.END)
 
     def update_plots(epoch_losses, epoch_accuracies):
         ax1.clear()
@@ -54,12 +71,8 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         ax2.legend()
         canvas.draw()
 
-    # Setup TenSEAL context
-    context = ts.context(ts.SCHEME_TYPE.CKKS, poly_modulus_degree=8192, coeff_mod_bit_sizes=[60, 40, 40, 60])
-    context.global_scale = 2**40
-    context.generate_galois_keys()
-
     dataset_train, dataset_test, dict_party_user, _ = get_dataset(args)
+
     if args.model == 'cnn' and args.dataset == 'MNIST':
         net_glob = Mnistcnn(args=args).to(args.device)
     elif args.model == 'mlp':
@@ -71,11 +84,10 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         update_text('Error: unrecognized model')
         return
 
-    update_text('Federated Learning Simulation started. Initializing model architecture...\n')
-    update_text('Model architecture loaded and initialized. Starting training process on dataset: ' + args.dataset + '\n')
     net_glob.train()
     epoch_losses = []
     epoch_accuracies = []
+    
 
     for iter in range(args.epochs):
         update_text(f'+++ Epoch {iter + 1} starts +++')
@@ -90,21 +102,17 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
             local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_party_user[user])
             w, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
 
-            # Encrypt weights here using CKKS
-            ew = [ts.ckks_vector(context, w_i.numpy().flatten()) for k, w_i in w.items()]
-            encrypted_weights.append(ew)
-            update_text(f'Client {user} training complete. Loss: {loss:.4f}')
-            update_text(f'Encrypting model weights at client {user}...')
-
+            # Encrypt weights
+            weights = torch.nn.utils.parameters_to_vector(net_glob.parameters()).detach().numpy()
+            encrypted_weights.append(encrypt_weights(weights, context))
             local_losses.append(loss)
+            update_text(f'Client {user} has completed training. Loss: {loss:.4f}')
 
         # Homomorphically average the encrypted weights
-        update_text('Aggregating encrypted model updates...')
-        avg_encrypted_weights = [sum(weights) / len(weights) for weights in zip(*encrypted_weights)]
-        update_text('Decryption and aggregation of model updates at the server...')
-        decrypted_avg_weights = {k: torch.tensor(w.decrypt()).view_as(net_glob.state_dict()[k]) for k, w in zip(net_glob.state_dict().keys(), avg_encrypted_weights)}
-
-        net_glob.load_state_dict(decrypted_avg_weights)
+        context = ...  # Ensure this is defined or available where needed
+        avg_encrypted_weights = he_avg_weights(encrypted_weights, context)
+        decrypted_avg_weights = decrypt_weights(avg_encrypted_weights, context)
+        torch.nn.utils.vector_to_parameters(torch.tensor(decrypted_avg_weights), net_glob.parameters())
         update_text('Decrypted aggregated model updates applied.')
 
         net_glob.eval()
@@ -120,35 +128,25 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
     update_text('Training complete. Summary of results:')
     update_text(f'Final Training Accuracy: {acc_train:.2f}')
 
-
 def create_gui(args):
     root = tk.Tk()
     root.title('Federated Learning Simulation')
-
-    # Create a scrolled text area widget
-    custom_font = font.Font(family="San Francisco", size=16)
-    text_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=50, height=10, font=custom_font)
+    text_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=50, height=10, font=font.Font(family="San Francisco", size=16))
     text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-    # Setup for Matplotlib figures
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8))
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.get_tk_widget().pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
+    context = setup_tenseal_context()
 
-    # Function to run the learning process
     def run_learning_process():
         start_time = time.time()
-        sequential_process(args, text_area, ax1, ax2, fig, canvas)
+        sequential_process(args, text_area, ax1, ax2, fig, canvas, context)
         total_time = time.time() - start_time
         text_area.insert(tk.END, f"Total time for completion: {total_time / 60:.2f} minutes.")
 
-    # Start the learning process in a separate thread to keep GUI responsive
-    thread = threading.Thread(target=run_learning_process)
-    thread.start()
-
+    threading.Thread(target=run_learning_process).start()
     root.mainloop()
-
 
 if __name__ == '__main__':
     args = args_parser()
