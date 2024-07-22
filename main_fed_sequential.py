@@ -36,7 +36,6 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         canvas.draw()
 
     dataset_train, dataset_test, dict_party_user, _ = get_dataset(args)
-
     if args.model == 'cnn' and args.dataset == 'MNIST':
         net_glob = Mnistcnn(args=args).to(args.device)
     elif args.model == 'mlp':
@@ -62,28 +61,29 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         np.random.shuffle(idxs_users)
 
         local_losses = []
-        local_weights = []
-
-        aggregated_weights = copy.deepcopy(net_glob.state_dict())  # Start with the initial model weights for aggregation
+        cumulative_weights = None
 
         for idx, user in enumerate(idxs_users):
             update_text(f'Starting training on client {user}')
             local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_party_user[user])
             local_weights, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
             local_losses.append(loss)
-            
-            # Aggregate weights with the current aggregated weights
-            for key in aggregated_weights.keys():
-                aggregated_weights[key] += local_weights[key]
-            
+
+            # Aggregating weights using FedAvg
+            if cumulative_weights is None:
+                cumulative_weights = local_weights
+                update_text(f'First client {user} has completed training. No aggregation needed.')
+            else:
+                cumulative_weights = FedAvg([cumulative_weights, local_weights])
+
             update_text(f'Client {user} has completed training. Loss: {loss:.4f}')
             if idx < len(idxs_users) - 1:
                 next_client = idxs_users[idx + 1]
-                update_text(f'Aggregated weights are being sent from Client {user} to Client {next_client}')
+                update_text(f'Passing aggregated weights from Client {user} to Client {next_client}')
 
-        # Send the final aggregated weights from the last client back to the server
-        update_text('Final aggregated weights are sent to the server for updating the global model.')
-        net_glob.load_state_dict({key: val / len(idxs_users) for key, val in aggregated_weights.items()})  # Average the weights
+        # Updating global model on the server with the final weights from the last client
+        net_glob.load_state_dict(cumulative_weights)
+        update_text('Server has updated the global model with final aggregated weights.')
 
         net_glob.eval()
         acc_train, _ = test_fun(net_glob, dataset_train, args)
@@ -97,6 +97,7 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
     exp_details(args)
     update_text('Training complete. Summary of results:')
     update_text(f'Final Training Accuracy: {acc_train:.2f}')
+
 
 
 def create_gui(args):
