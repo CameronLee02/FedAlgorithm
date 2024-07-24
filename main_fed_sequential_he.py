@@ -1,3 +1,9 @@
+'''
+Sequential Federated Learning Algorithm
+Alian Haidar - 22900426
+Last Modified: CODE INCORRECT, DO NOT USE
+'''
+
 import copy
 import numpy as np
 import torch
@@ -48,7 +54,7 @@ def aggregate_encrypted_weights(encrypted_weights_list):
     return aggregated_weights
 
 def sequential_process(args, text_widget, ax1, ax2, fig, canvas, context):
-    
+
     def update_text(message):
         text_widget.insert(tk.END, message + '\n')
         text_widget.see(tk.END)
