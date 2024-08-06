@@ -1,7 +1,7 @@
 '''
-Sequential Federated Learning Algorithm
+Sequential Federated Learning Algorithm with Paillier Encryption
 Alian Haidar - 22900426
-Last Modified: CODE INCORRECT, DO NOT USE
+Last Modified: 2024-07-24
 '''
 
 import copy
@@ -13,53 +13,61 @@ from tkinter import scrolledtext, ttk, font
 import threading
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-import tenseal as ts
+from phe import paillier
 
 from models.Nets import MLP, Mnistcnn
 from models.Update import LocalUpdate
 from models.test import test_fun
 from utils.dataset import get_dataset, exp_details
 from utils.options import args_parser
-from models.Fed import FedAvg  # Import the FedAvg function
+from models.Fed import FedAvg  # Import FedAvg function from models/Fed.py
 
-def setup_he_context():
-    context = ts.context(ts.SCHEME_TYPE.CKKS, poly_modulus_degree=8192, coeff_mod_bit_sizes=[60, 40, 40, 60])
-    context.global_scale = 2**40
-    context.generate_galois_keys()
-    return context
+def choose_model(args, dataset_train):
+    '''Initialize and return the appropriate model based on args.'''
+    if args.model == 'cnn' and args.dataset == 'MNIST':
+        len_in = 1
+        for dim in dataset_train[0][0].shape:
+            len_in *= dim
+        return Mnistcnn(args=args).to(args.device)
+    elif args.model == 'mlp':
+        len_in = 1
+        for dim in dataset_train[0][0].shape:
+            len_in *= dim
+        return MLP(dim_in=len_in, dim_hidden=200, dim_out=args.num_classes).to(args.device)
+    else:
+        raise ValueError('Error: unrecognized model')
 
-def encrypt_weights(weights, context):
+def encrypt_weights(weights, public_key):
+    '''Encrypt model weights.'''
     encrypted_weights = {}
-    for key, weight in weights.items():
-        encrypted_weights[key] = ts.ckks_vector(context, weight.numpy().flatten())
+    for key, val in weights.items():
+        print("Encrypting...")
+        # Convert tensor to list of floats, then encrypt each element
+        flat_list = val.flatten().tolist()  # Convert tensor to list of Python floats
+        encrypted_weights[key] = [public_key.encrypt(v) for v in flat_list]
     return encrypted_weights
 
-def decrypt_weights(encrypted_weights, context, shape_map):
+
+
+def decrypt_weights(encrypted_weights, private_key):
+    '''Decrypt model weights.'''
     decrypted_weights = {}
-    for key, encrypted_weight in encrypted_weights.items():
-        decrypted_weights[key] = torch.tensor(encrypted_weight.decrypt()).view(shape_map[key])
+    for key, enc_vals in encrypted_weights.items():
+        decrypted_weights[key] = torch.tensor([private_key.decrypt(v) for v in enc_vals])
     return decrypted_weights
 
-def train_and_encrypt(data, net, context):
-    local = LocalUpdate(args=args, dataset=data.dataset, idxs=data.idxs)
-    local_weights, loss = local.train(net=copy.deepcopy(net).to(args.device))
-    encrypted_weights = encrypt_weights(local_weights, context)
-    return encrypted_weights, loss
-
-def aggregate_encrypted_weights(encrypted_weights_list):
-    aggregated_weights = encrypted_weights_list[0]
-    for weights in encrypted_weights_list[1:]:
-        for key in aggregated_weights:
-            aggregated_weights[key] += weights[key]
-    return aggregated_weights
-
-def sequential_process(args, text_widget, ax1, ax2, fig, canvas, context):
+def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
+    '''Sequential Federated Learning Algorithm process for a given number of epochs.'''
+    # Generate Paillier keypair
+    public_key, private_key = paillier.generate_paillier_keypair()
 
     def update_text(message):
+        '''Function to update the text area in the GUI.'''
         text_widget.insert(tk.END, message + '\n')
         text_widget.see(tk.END)
 
     def update_plots(epoch_losses, epoch_accuracies):
+        '''Function to update the plots in the GUI.'''
         ax1.clear()
         ax2.clear()
         ax1.plot(epoch_losses, label='Average Loss per Epoch', marker='o')
@@ -75,48 +83,82 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas, context):
         canvas.draw()
 
     dataset_train, dataset_test, dict_party_user, _ = get_dataset(args)
-    net_glob = MLP(dim_in=784, dim_hidden=200, dim_out=10).to(args.device)  # Example for MNIST
+    net_glob = choose_model(args, dataset_train)
 
-    shape_map = {key: val.shape for key, val in net_glob.state_dict().items()}  # Save shapes for decryption
+    update_text('Federated Learning Simulation started. Initializing model architecture...\n')
+    update_text('Model architecture loaded and initialized. Starting training process on dataset: ' + args.dataset + '\n')
+    update_plots([], [])
+    net_glob.train()
+
+    epoch_losses = []
+    epoch_accuracies = []
 
     for iter in range(args.epochs):
-        encrypted_aggregated_weights = None
-
+        update_text(f'+++ Epoch {iter + 1} starts +++')
         idxs_users = list(range(args.num_users))
         np.random.shuffle(idxs_users)
 
-        for idx, user in enumerate(idxs_users):
-            encrypted_weights, loss = train_and_encrypt(dict_party_user[user], net_glob, context)
-            if encrypted_aggregated_weights is None:
-                encrypted_aggregated_weights = encrypted_weights
-            else:
-                encrypted_aggregated_weights = aggregate_encrypted_weights([encrypted_aggregated_weights, encrypted_weights])
+        local_losses = []
+        encrypted_cumulative_weights = None
 
-        final_weights = decrypt_weights(encrypted_aggregated_weights, context, shape_map)
-        net_glob.load_state_dict(final_weights)
+        for idx, user in enumerate(idxs_users):
+            update_text(f'Starting training on client {user}')
+            local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_party_user[user])
+            local_weights, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
+            local_losses.append(loss)
+            
+            encrypted_local_weights = encrypt_weights(local_weights, public_key)
+            
+            if encrypted_cumulative_weights is None:
+                encrypted_cumulative_weights = encrypted_local_weights
+            else:
+                encrypted_cumulative_weights = FedAvg([encrypted_cumulative_weights, encrypted_local_weights], public_key)
+
+            update_text(f'Client {user} has completed training. Loss: {loss:.4f}')
+            if idx < len(idxs_users) - 1:
+                next_client = idxs_users[idx + 1]
+                update_text(f'Passing encrypted aggregated weights from Client {user} to Client {next_client}')
+
+        decrypted_final_weights = decrypt_weights(encrypted_cumulative_weights, private_key)
+        net_glob.load_state_dict(decrypted_final_weights)
+        update_text('Server has updated the global model with decrypted aggregated weights.')
 
         net_glob.eval()
         acc_train, _ = test_fun(net_glob, dataset_train, args)
-        update_text(text_widget, f'Epoch {iter + 1} completed. Train Acc: {acc_train:.2f}')
+        epoch_losses.append(np.mean(local_losses))
+        epoch_accuracies.append(acc_train)
+
+        update_text(f'Epoch {iter + 1} completed. Train Acc: {acc_train:.2f}')
+        update_plots(epoch_losses, epoch_accuracies)
+        update_text('---\n')
+
+    exp_details(args)
+    update_text('Training complete. Summary of results:')
+    update_text(f'Final Training Accuracy: {acc_train:.2f}')
 
 def create_gui(args):
+    '''Function to create the GUI for the simulation.'''
     root = tk.Tk()
     root.title('Federated Learning Simulation')
 
-    text_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=50, height=10, font=font.Font(family="San Francisco", size=16))
+    # Create a scrolled text area widget
+    custom_font = font.Font(family="San Francisco", size=16)
+    text_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=50, height=10, font=custom_font)
     text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+    # Setup for Matplotlib figures
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8))
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.get_tk_widget().pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
+    # Function to run the learning process
     def run_learning_process():
         start_time = time.time()
-        context = setup_he_context()
-        sequential_process(args, text_area, ax1, ax2, fig, canvas, context)
+        sequential_process(args, text_area, ax1, ax2, fig, canvas)
         total_time = time.time() - start_time
         text_area.insert(tk.END, f"Total time for completion: {total_time / 60:.2f} minutes.")
 
+    # Start the learning process in a separate thread to keep GUI responsive
     thread = threading.Thread(target=run_learning_process)
     thread.start()
 
