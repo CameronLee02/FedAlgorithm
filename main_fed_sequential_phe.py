@@ -1,7 +1,3 @@
-'''
-RSA ENCRYPTION BUT ONLY THE BEGINNING AND END OF SERIES LINK
-'''
-
 import copy
 import numpy as np
 import torch
@@ -11,8 +7,7 @@ from tkinter import scrolledtext, font
 import threading
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_OAEP
+from phe import paillier
 
 from models.Nets import MLP, Mnistcnn
 from models.Update import LocalUpdate
@@ -20,45 +15,60 @@ from models.test import test_fun
 from utils.dataset import get_dataset, exp_details
 from utils.options import args_parser
 
-# RSA Key Generation
-key = RSA.generate(2048)
-private_key = key.export_key()
-public_key = key.publickey().export_key()
+def generate_paillier_keypair():
+    """Generate a Paillier key pair."""
+    public_key, private_key = paillier.generate_paillier_keypair()
+    return public_key, private_key
 
-# Create cipher objects for encryption and decryption
-encrypt_cipher = PKCS1_OAEP.new(RSA.import_key(public_key))
-decrypt_cipher = PKCS1_OAEP.new(RSA.import_key(private_key))
+def encrypt_weight(weight, public_key):
+    """Encrypt the weight using Paillier public key."""
+    weight_flat = weight.cpu().numpy().flatten().astype(np.float64)  # Ensure float64 for compatibility
+    if np.any(np.isnan(weight_flat)):
+        raise ValueError("Weights contain NaN values.")
+    encrypted_weight = [public_key.encrypt(x) for x in weight_flat]
+    return encrypted_weight
 
-def encrypt_edge_weights(weights_dict, cipher, max_chunk_size=190):
-    """Encrypt specific edge weights using RSA with chunking."""
+def decrypt_weight(encrypted_weight, private_key, original_shape):
+    """Decrypt the weight using Paillier private key."""
+    decrypted_flat = [private_key.decrypt(x) for x in encrypted_weight]
+    decrypted_array = np.array(decrypted_flat).reshape(original_shape)
+    return torch.from_numpy(decrypted_array).float()  # Convert back to float32
+
+def encrypt_edge_weights(weights_dict, public_key):
+    """Encrypt specific edge weights for a single client."""
     encrypted_weights = {}
     for name, weight in weights_dict.items():
-        if name in ['conv1.weight', 'fc3.weight']:  # Encrypt input and output layer weights
-            weight_bytes = weight.cpu().numpy().tobytes()
-            encrypted_chunks = [cipher.encrypt(weight_bytes[i:i + max_chunk_size]) 
-                                for i in range(0, len(weight_bytes), max_chunk_size)]
-            encrypted_weights[name] = encrypted_chunks
+        if name in ['conv1.weight', 'fc3.weight']:  # Only encrypt specific edge weights
+            encrypted_weights[name] = encrypt_weight(weight, public_key)
         else:
             encrypted_weights[name] = weight  # Keep other weights unchanged
     return encrypted_weights
 
-def decrypt_edge_weights(encrypted_weights, cipher, original_shapes):
-    """Decrypt specific edge weights using RSA with chunking."""
-    decrypted_weights = {}
-    for name, weight in encrypted_weights.items():
-        if isinstance(weight, list):  # Check if the weight is a list of encrypted chunks
-            decrypted_bytes = b''.join([cipher.decrypt(chunk) for chunk in weight])
-            decrypted_array = np.frombuffer(decrypted_bytes, dtype=np.float32).reshape(original_shapes[name])
-            decrypted_weights[name] = torch.from_numpy(decrypted_array)
+def aggregate_encrypted_weights(current_encrypted, new_encrypted):
+    """Aggregate encrypted weights from the current and new updates."""
+    aggregated_weights = {}
+    for name in current_encrypted.keys():
+        if isinstance(current_encrypted[name], list):  # Only aggregate encrypted weights
+            aggregated_weights[name] = [x + y for x, y in zip(current_encrypted[name], new_encrypted[name])]
         else:
-            decrypted_weights[name] = weight
+            aggregated_weights[name] = current_encrypted[name] + new_encrypted[name]
+    return aggregated_weights
+
+def decrypt_edge_weights(encrypted_weights, private_key, original_shapes):
+    """Decrypt aggregated encrypted weights using the shared private key."""
+    decrypted_weights = {}
+    for name, encrypted_data in encrypted_weights.items():
+        if isinstance(encrypted_data, list):
+            decrypted_weights[name] = decrypt_weight(encrypted_data, private_key, original_shapes[name])
+        else:
+            decrypted_weights[name] = encrypted_data
     return decrypted_weights
 
 def FedAvg(weights_list):
     """Federated Averaging for model weights."""
     w_avg = copy.deepcopy(weights_list[0])
     for k in w_avg.keys():
-        if isinstance(w_avg[k], list):  # Handle encrypted lists separately
+        if isinstance(w_avg[k], list):  # Skip encrypted lists
             continue
         for i in range(1, len(weights_list)):
             w_avg[k] += weights_list[i][k]
@@ -67,7 +77,7 @@ def FedAvg(weights_list):
 
 def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
     '''Sequential Federated Learning Algorithm process for a given number of epochs.'''
-    
+
     def update_text(message):
         '''Function to update the text area in the GUI.'''
         text_widget.insert(tk.END, message + '\n')
@@ -107,46 +117,52 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
     update_text('Model architecture loaded and initialized. Starting training process on dataset: ' + args.dataset + '\n')
     update_plots([], [])
 
-    net_glob.train() # Set the model to training mode
+    net_glob.train()  # Set the model to training mode
 
     epoch_losses = []
     epoch_accuracies = []
 
-    for iter in range(args.epochs): # Number of training epochs
+    # Generate a shared Paillier key pair for all clients
+    shared_public_key, shared_private_key = generate_paillier_keypair()
+
+    for iter in range(args.epochs):  # Number of training epochs
         update_text(f'+++ Epoch {iter + 1} starts +++')
         idxs_users = list(range(args.num_users))
         np.random.shuffle(idxs_users)
 
         local_losses = []
-        cumulative_weights = None
 
-        for idx, user in enumerate(idxs_users): # Iterate through each client
+        # Initialize the cumulative encrypted weights with the server's global model
+        cumulative_encrypted_weights = encrypt_edge_weights(net_glob.state_dict(), shared_public_key)
+
+        for idx, user in enumerate(idxs_users):  # Iterate through each client
             update_text(f'Starting training on client {user}')
             local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_party_user[user])
             local_weights, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
             local_losses.append(loss)
 
-            # Save original shapes for reconstruction after decryption
-            original_shapes = {name: weight.shape for name, weight in local_weights.items()}
+            # Encrypt edge weights for this client using the shared public key
+            encrypted_weights = encrypt_edge_weights(local_weights, shared_public_key)
 
-            # Encrypt edge weights
-            encrypted_weights = encrypt_edge_weights(local_weights, encrypt_cipher)
-
-            if cumulative_weights is None:
-                cumulative_weights = encrypted_weights
-                update_text(f'First client {user} has completed training. No aggregation needed.')
-            else:
-                # Aggregate weights normally, skipping encryption here
-                cumulative_weights = FedAvg([cumulative_weights, local_weights])
+            # Aggregate current client weights with cumulative weights
+            cumulative_encrypted_weights = aggregate_encrypted_weights(cumulative_encrypted_weights, encrypted_weights)
 
             update_text(f'Client {user} has completed training. Loss: {loss:.4f}')
+            if idx < len(idxs_users) - 1:
+                next_client = idxs_users[idx + 1]
+                update_text(f'Passing aggregated weights from Client {user} to Client {next_client}')
 
-        # Decrypt the edge weights after aggregation
-        decrypted_weights = decrypt_edge_weights(cumulative_weights, decrypt_cipher, original_shapes)
+        # Last client sends the aggregated weights back to the server
+        update_text('Last client has sent the aggregated weights back to the server.')
+
+        # Decrypt aggregated weights with the shared private key
+        decrypted_weights = decrypt_edge_weights(cumulative_encrypted_weights, shared_private_key, {name: local_weights[name].shape for name in local_weights})
+
+        # Update global model
         net_glob.load_state_dict(decrypted_weights)
         update_text('Server has updated the global model with final aggregated weights.')
 
-        net_glob.eval() # Set the model to evaluation mode
+        net_glob.eval()  # Set the model to evaluation mode
         acc_train, _ = test_fun(net_glob, dataset_train, args)
         epoch_losses.append(np.mean(local_losses))
         epoch_accuracies.append(acc_train)
@@ -158,7 +174,6 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
     exp_details(args)
     update_text('Training complete. Summary of results:')
     update_text(f'Final Training Accuracy: {acc_train:.2f}')
-
 
 def create_gui(args):
     '''Function to create the GUI for the simulation.'''
@@ -176,7 +191,6 @@ def create_gui(args):
     canvas = FigureCanvasTkAgg(fig, master=root)
     canvas.get_tk_widget().pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-
     # Function to run the learning process
     def run_learning_process():
         start_time = time.time()
@@ -190,12 +204,10 @@ def create_gui(args):
 
     root.mainloop()
 
-
 if __name__ == '__main__':
     args = args_parser()
     args.device = torch.device('cuda:{}'.format(args.gpu) if torch.cuda.is_available() and args.gpu != -1 else 'cpu')
     create_gui(args)
-
 
 '''
 How to Run: 
