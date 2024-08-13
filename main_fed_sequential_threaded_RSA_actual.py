@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from Crypto.PublicKey import RSA
 from Crypto.Cipher import PKCS1_OAEP
+from threading import Lock
 
 from models.Nets import MLP, Mnistcnn
 from models.Update import LocalUpdate
@@ -24,6 +25,11 @@ public_key = key.publickey().export_key()
 # Create cipher objects for encryption and decryption
 encrypt_cipher = PKCS1_OAEP.new(RSA.import_key(public_key))
 decrypt_cipher = PKCS1_OAEP.new(RSA.import_key(private_key))
+
+def update_text(message, text_widget):
+    '''Function to update the text area in the GUI.'''
+    text_widget.insert(tk.END, message + '\n')
+    text_widget.see(tk.END)
 
 def encrypt_edge_weights(weights_dict, cipher, max_chunk_size=190):
     """Encrypt specific edge weights using RSA with chunking."""
@@ -61,13 +67,28 @@ def FedAvg(weights_list):
         w_avg[k] = torch.div(w_avg[k], len(weights_list))
     return w_avg
 
+def client_training(client_id, cumulative_weights, cumulative_lock, dataset_train, dict_party_user, net_glob, encrypt_cipher, text_widget):
+    """Function for training a client."""
+    update_text(f'Starting training on client {client_id}', text_widget)
+    local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_party_user[client_id])
+
+    # Perform local training and aggregate weights
+    local_weights, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
+    
+    # Thread-safe update of cumulative weights
+    with cumulative_lock:
+        cumulative_weights = FedAvg([local_weights, cumulative_weights])
+    
+    # Encrypt the cumulative weights
+    encrypted_weights = encrypt_edge_weights(cumulative_weights, encrypt_cipher)
+
+    update_text(f'Client {client_id} has completed training. Loss: {loss:.4f}', text_widget)
+
+    return encrypted_weights, loss
+
 def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
     '''Sequential Federated Learning Algorithm process for a given number of epochs.'''
-    
-    def update_text(message):
-        '''Function to update the text area in the GUI.'''
-        text_widget.insert(tk.END, message + '\n')
-        text_widget.see(tk.END)
+
 
     def update_plots(epoch_losses, epoch_accuracies):
         '''Function to update the plots in the GUI.'''
@@ -96,12 +117,12 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
             len_in *= dim
         net_glob = MLP(dim_in=len_in, dim_hidden=200, dim_out=args.num_classes).to(args.device)
     else:
-        update_text('Error: unrecognized model')
+        update_text('Error: unrecognized model', text_widget)
         return
 
-    update_text('Encrypted Federated Learning Simulation started. Initializing model architecture...\n')
-    update_text('Model architecture loaded and initialized. Starting training process on dataset: ' + args.dataset + '\n')
-    update_text('RSA Key Generation completed. Starting training process...\n')
+    update_text('EncryptedFederated Learning Simulation started. Initializing model architecture...\n', text_widget)
+    update_text('Model architecture loaded and initialized. Starting training process on dataset: ' + args.dataset + '\n', text_widget)
+    update_text('Threading Enabled, RSA Key Generation completed. Starting training process...\n', text_widget)
     update_plots([], [])
 
     net_glob.train() # Set the model to training mode
@@ -110,7 +131,7 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
     epoch_accuracies = []
 
     for iter in range(args.epochs): # Number of training epochs
-        update_text(f'+++ Epoch {iter + 1} starts +++')
+        update_text(f'+++ Epoch {iter + 1} starts +++', text_widget)
         idxs_users = list(range(args.num_users))
         np.random.shuffle(idxs_users)
 
@@ -123,47 +144,48 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         # Encrypt edge weights initially (before first client)
         encrypted_weights = encrypt_edge_weights(cumulative_weights, encrypt_cipher)
 
-        for idx, user in enumerate(idxs_users): # Iterate through each client
-            update_text(f'Starting training on client {user}')
-            local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_party_user[user])
-            
-            # Decrypt weights at each client (except the first)
-            if idx > 0:
-                decrypted_weights = decrypt_edge_weights(encrypted_weights, decrypt_cipher, original_shapes)
-                local_weights, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
-                cumulative_weights = FedAvg([decrypted_weights, local_weights])
-            else:
-                local_weights, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
-                cumulative_weights = FedAvg([cumulative_weights, local_weights])
+        # Create a lock for cumulative weights
+        cumulative_lock = Lock()
 
+        # Create threads for each client
+        threads = []
+        results = [None] * len(idxs_users)
+
+        def client_thread_func(idx, user):
+            """Function to run a client training in a thread."""
+            encrypted_weights, loss = client_training(user, cumulative_weights, cumulative_lock, dataset_train, dict_party_user, net_glob, encrypt_cipher, text_widget)
+            results[idx] = (encrypted_weights, loss)
+
+        for idx, user in enumerate(idxs_users):
+            thread = threading.Thread(target=client_thread_func, args=(idx, user))
+            threads.append(thread)
+            thread.start()
+
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+
+        # Collect results
+        for encrypted_weights, loss in results:
             local_losses.append(loss)
 
-            # Encrypt the cumulative weights after each client (except the last)
-            if idx < len(idxs_users) - 1:
-                encrypted_weights = encrypt_edge_weights(cumulative_weights, encrypt_cipher)
-            else:
-                # Final client doesn't need to encrypt
-                encrypted_weights = cumulative_weights
-
-            update_text(f'Client {user} has completed training. Loss: {loss:.4f}')
-
-        # Decrypt the edge weights after the last client
+        # The final client sends encrypted weights to the server for decryption
         decrypted_weights = decrypt_edge_weights(encrypted_weights, decrypt_cipher, original_shapes)
         net_glob.load_state_dict(decrypted_weights)
-        update_text('Server has updated the global model with final aggregated weights.')
+        update_text('Server has updated the global model with final aggregated weights.', text_widget)
 
         net_glob.eval() # Set the model to evaluation mode
         acc_train, _ = test_fun(net_glob, dataset_train, args)
         epoch_losses.append(np.mean(local_losses))
         epoch_accuracies.append(acc_train)
 
-        update_text(f'Epoch {iter + 1} completed. Train Acc: {acc_train:.2f}')
+        update_text(f'Epoch {iter + 1} completed. Train Acc: {acc_train:.2f}', text_widget)
         update_plots(epoch_losses, epoch_accuracies)
-        update_text('---\n')
+        update_text('---\n', text_widget)
 
     exp_details(args)
-    update_text('Training complete. Summary of results:')
-    update_text(f'Final Training Accuracy: {acc_train:.2f}')
+    update_text('Training complete. Summary of results:', text_widget)
+    update_text(f'Final Training Accuracy: {acc_train:.2f}', text_widget)
 
 
 def create_gui(args):

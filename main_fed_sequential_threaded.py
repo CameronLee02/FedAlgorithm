@@ -1,3 +1,9 @@
+'''
+Sequential Federated Learning Algorithm THREADED
+Alian Haidar - 22900426
+Last Modified: 2024-08-07
+'''
+
 import copy
 import numpy as np
 import torch
@@ -14,10 +20,10 @@ from models.Update import LocalUpdate
 from models.test import test_fun
 from utils.dataset import get_dataset, exp_details
 from utils.options import args_parser
-from models.Fed import FedAvg  # Import FedAvg function from models/Fed.py
+from models.Fed import FedAvg
 
 def client_training(client_id, net_glob, args, dataset_train, dict_party_user, weight_queue, lock, done_event, text_widget, local_losses):
-    """Function for training a client."""
+    """Function for training a client model on a separate thread."""
     update_text(f'Starting training on client {client_id}', text_widget)
     
     local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_party_user[client_id])

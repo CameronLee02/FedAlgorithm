@@ -127,27 +127,18 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
             update_text(f'Starting training on client {user}')
             local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_party_user[user])
             
-            # Decrypt weights at each client (except the first)
-            if idx > 0:
-                decrypted_weights = decrypt_edge_weights(encrypted_weights, decrypt_cipher, original_shapes)
-                local_weights, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
-                cumulative_weights = FedAvg([decrypted_weights, local_weights])
-            else:
-                local_weights, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
-                cumulative_weights = FedAvg([cumulative_weights, local_weights])
+            # Perform local training and aggregate weights (without decryption)
+            local_weights, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
+            cumulative_weights = FedAvg([local_weights, cumulative_weights])
+
+            # Encrypt the cumulative weights after each client
+            encrypted_weights = encrypt_edge_weights(cumulative_weights, encrypt_cipher)
 
             local_losses.append(loss)
 
-            # Encrypt the cumulative weights after each client (except the last)
-            if idx < len(idxs_users) - 1:
-                encrypted_weights = encrypt_edge_weights(cumulative_weights, encrypt_cipher)
-            else:
-                # Final client doesn't need to encrypt
-                encrypted_weights = cumulative_weights
-
             update_text(f'Client {user} has completed training. Loss: {loss:.4f}')
 
-        # Decrypt the edge weights after the last client
+        # The final client sends encrypted weights to the server for decryption
         decrypted_weights = decrypt_edge_weights(encrypted_weights, decrypt_cipher, original_shapes)
         net_glob.load_state_dict(decrypted_weights)
         update_text('Server has updated the global model with final aggregated weights.')
@@ -162,7 +153,7 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         update_text('---\n')
 
     exp_details(args)
-    update_text('Training complete. Summary of results:')
+    update_text('Training complete with RSA Encryption. Summary of results:')
     update_text(f'Final Training Accuracy: {acc_train:.2f}')
 
 
