@@ -1,3 +1,9 @@
+'''
+Sequential Federated Learning Algorithm THREADED WITH CKKS ENCRYPTION
+Alian Haidar - 22900426
+Last Modified: 2024-08-14
+'''
+
 import copy
 import numpy as np
 import torch
@@ -123,6 +129,18 @@ def client_training(client_id, dataset_train, dict_party_user, net_glob, text_wi
     update_text(f'Client {client_id} has completed aggregation.', text_widget)
     return encrypted_weights, local_weights, loss  # Return both encrypted and unencrypted weights
 
+def threaded_client_training(client_id, dataset_train, dict_party_user, net_glob, context, text_widget, received_encrypted_weights, results):
+    encrypted_weights, local_weights, loss = client_training(
+        client_id,
+        dataset_train,
+        dict_party_user,
+        net_glob,
+        text_widget,
+        context,
+        received_encrypted_weights
+    )
+    results[client_id] = (encrypted_weights, local_weights, loss)
+
 def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
     def update_plots(epoch_losses, epoch_accuracies):
         ax1.clear()
@@ -175,17 +193,22 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         received_encrypted_weights = None
         received_unencrypted_weights = None  # Store unencrypted weights for comparison
 
+        results = {}
+        threads = []
+
         for idx, user in enumerate(idxs_users):
-            update_text(f'Client {user} is starting training and encryption.', text_widget)
-            encrypted_weights, local_weights, loss = client_training(
-                user,
-                dataset_train,
-                dict_party_user,
-                net_glob,
-                text_widget,
-                context,
-                received_encrypted_weights
+            thread = threading.Thread(
+                target=threaded_client_training,
+                args=(user, dataset_train, dict_party_user, net_glob, context, text_widget, received_encrypted_weights, results)
             )
+            threads.append(thread)
+            thread.start()
+
+        for thread in threads:
+            thread.join()
+
+        for idx, user in enumerate(idxs_users):
+            encrypted_weights, local_weights, loss = results[user]
             received_encrypted_weights = encrypted_weights
             received_unencrypted_weights = local_weights  # Keep track of unencrypted weights
             local_losses.append(loss)
@@ -201,8 +224,8 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         # Compare decrypted weights with unencrypted weights
         compare_weights(decrypted_weights, received_unencrypted_weights, text_widget)
 
-        #net_glob.load_state_dict(decrypted_weights) #Encrypted weights used for comparison
-        net_glob.load_state_dict(received_unencrypted_weights)
+        net_glob.load_state_dict(decrypted_weights) #Encrypted weights used for comparison
+        #net_glob.load_state_dict(received_unencrypted_weights)
         update_text('Server has updated the global model with final aggregated weights.', text_widget)
 
         net_glob.eval()

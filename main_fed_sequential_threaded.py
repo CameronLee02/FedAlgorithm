@@ -1,5 +1,5 @@
 '''
-Sequential Federated Learning Algorithm THREADED
+Sequential Federated Learning Algorithm THREADED (NO HE)
 Alian Haidar - 22900426
 Last Modified: 2024-08-07
 '''
