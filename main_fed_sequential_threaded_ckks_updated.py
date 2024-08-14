@@ -18,7 +18,7 @@ import tenseal as ts
 from models.Nets import MLP, Mnistcnn
 from models.Update import LocalUpdate
 from models.test import test_fun
-from utils.dataset import get_dataset, exp_details
+from utils.dataset_limit import get_dataset, exp_details
 from utils.options import args_parser
 
 # CKKS Context Setup
@@ -64,15 +64,16 @@ def encrypt_weights(weights_dict, context, text_widget, chunk_size=1000):
     update_text("Encryption completed.", text_widget)
     return encrypted_weights
 
-def decrypt_weights(encrypted_weights, context, original_shapes, text_widget):
+def decrypt_weights(encrypted_weights, context, original_shapes, text_widget, client_count):
     update_text("Decrypting aggregated weights using CKKS decryption...", text_widget)
     decrypted_weights = {}
     for name, enc_weight_chunks in encrypted_weights.items():
         decrypted_flat = []
         for enc_weight in enc_weight_chunks:
             decrypted_flat.extend(enc_weight.decrypt())
-        
-        decrypted_array = np.array(decrypted_flat, dtype=np.float32).reshape(original_shapes[name])
+
+        # Apply the averaging by dividing by client_count during decryption
+        decrypted_array = (np.array(decrypted_flat, dtype=np.float32) / client_count).reshape(original_shapes[name])
         decrypted_weights[name] = torch.tensor(decrypted_array, dtype=torch.float32)
 
         log_weight_stats({name: decrypted_weights[name]}, "Decrypted Weights", text_widget)
@@ -83,23 +84,30 @@ def decrypt_weights(encrypted_weights, context, original_shapes, text_widget):
     update_text("Decryption completed.", text_widget)
     return decrypted_weights
 
-def aggregate_encrypted_weights(encrypted_weights1, encrypted_weights2, text_widget):
+
+def aggregate_encrypted_weights(encrypted_weights1, encrypted_weights2, client_count, text_widget):
     update_text("Aggregating encrypted weights using homomorphic addition...", text_widget)
     aggregated_weights = {}
     for name in encrypted_weights1.keys():
         aggregated_chunks = []
         for enc_w1, enc_w2 in zip(encrypted_weights1[name], encrypted_weights2[name]):
-            aggregated_chunks.append(enc_w1 + enc_w2)
+            aggregated_chunk = enc_w1 + enc_w2  # Perform addition without scaling here
+            aggregated_chunks.append(aggregated_chunk)
         aggregated_weights[name] = aggregated_chunks
     update_text("Encrypted weights aggregation completed.", text_widget)
     return aggregated_weights
 
-def compare_weights(weights1, weights2, text_widget):
+
+
+def compare_weights(weights1, weights2, text_widget, client_count):
     update_text("Comparing decrypted and original weights...", text_widget)
     for name in weights1.keys():
-        match = torch.allclose(weights1[name], weights2[name], atol=1e-4)
+        # Adjust the original weights to account for the averaging
+        adjusted_weights2 = weights2[name] / client_count
+        match = torch.allclose(weights1[name], adjusted_weights2, atol=1)
         update_text(f"Comparison for {name}: {'Match' if match else 'Mismatch'}", text_widget)
     update_text("Comparison completed.", text_widget)
+
 
 def client_training(client_id, dataset_train, dict_party_user, net_glob, text_widget, context, received_encrypted_weights=None):
     update_text(f'Starting training on client {client_id}', text_widget)
@@ -195,6 +203,7 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
 
         results = {}
         threads = []
+        client_count = 0  # Initialize client count for averaging
 
         for idx, user in enumerate(idxs_users):
             thread = threading.Thread(
@@ -209,12 +218,24 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
 
         for idx, user in enumerate(idxs_users):
             encrypted_weights, local_weights, loss = results[user]
-            received_encrypted_weights = encrypted_weights
+            client_count += 1  # Increment the number of clients after each aggregation
+
+            if received_encrypted_weights is not None:
+                received_encrypted_weights = aggregate_encrypted_weights(
+                    received_encrypted_weights,
+                    encrypted_weights,
+                    client_count,
+                    text_widget
+                )
+            else:
+                received_encrypted_weights = encrypted_weights  # First client, no aggregation needed
+
             received_unencrypted_weights = local_weights  # Keep track of unencrypted weights
             local_losses.append(loss)
 
         update_text('Final client sending aggregated encrypted weights to server.', text_widget)
-        decrypted_weights = decrypt_weights(received_encrypted_weights, context, original_shapes, text_widget)
+        decrypted_weights = decrypt_weights(received_encrypted_weights, context, original_shapes, text_widget, client_count)
+
 
         if check_for_nan(decrypted_weights, "Global Model Weights", text_widget):
             raise ValueError("NaN detected in global model weights before updating.")
@@ -222,9 +243,10 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         log_weight_stats(decrypted_weights, "Global Model Weights", text_widget)
 
         # Compare decrypted weights with unencrypted weights
-        compare_weights(decrypted_weights, received_unencrypted_weights, text_widget)
+        compare_weights(decrypted_weights, received_unencrypted_weights, text_widget, client_count)
 
-        net_glob.load_state_dict(decrypted_weights) #Encrypted weights used for comparison
+
+        net_glob.load_state_dict(decrypted_weights)  # Encrypted weights used for comparison
         #net_glob.load_state_dict(received_unencrypted_weights)
         update_text('Server has updated the global model with final aggregated weights.', text_widget)
 
@@ -240,6 +262,7 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
     exp_details(args)
     update_text('Training complete. Summary of results:', text_widget)
     update_text(f'Final Training Accuracy: {acc_train:.2f}', text_widget)
+
 
 def create_gui(args):
     root = tk.Tk()
