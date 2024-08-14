@@ -9,6 +9,8 @@ main_fed_sequential_threaded_ckks_updated.py: CKKS Partial Addition Homomorphic 
 
 ## For Speed purposes:
 
+To speed up the simulation process, use the MNIST dataset and change the line of code below
+
 Within the code of the file, there is an import line, 
 ```
 from utils.dataset import get_dataset, exp_details
@@ -17,7 +19,7 @@ Changing from that into
 ```
 from utils.dataset_limit import get_dataset, exp_details
 ```
-will allow you to create and limit the train size and test size to a more suitable value to see how the simulation runs.
+will allow you to create and limit the train size and test size to a more suitable value to see how the simulation runs. (SPECIFIC TO MNIST ONLY)
 
 For example, using dataset_limit with a limit of 1000 sample will have its simulation completed in around 3 minutes, whilst the regular line will utilise the entire dataset and will take approximately 45 minutes to complete. (Values taken from MacBook Pro (M1 Pro, 16 GB Unified Memory)
 
