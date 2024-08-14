@@ -9,10 +9,11 @@ import numpy as np
 import torch
 import time
 import tkinter as tk
-from tkinter import scrolledtext, font
+from tkinter import scrolledtext, font, ttk
 import threading
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import matplotlib.animation as animation
 import tenseal as ts
 
 from models.Nets import MLP, Mnistcnn
@@ -153,17 +154,26 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
     def update_plots(epoch_losses, epoch_accuracies):
         ax1.clear()
         ax2.clear()
+
+        # Plotting with smaller font sizes
         ax1.plot(epoch_losses, label='Average Loss per Epoch', marker='o')
-        ax1.set_title('Training Loss Over Epochs')
-        ax1.set_xlabel('Epoch')
-        ax1.set_ylabel('Loss')
-        ax1.legend()
+        ax1.set_title('Training Loss Over Epochs', fontsize=8)  # Smaller title
+        ax1.set_xlabel('Epoch', fontsize=6)  # Smaller x-label
+        ax1.set_ylabel('Loss', fontsize=6)  # Smaller y-label
+        ax1.legend(fontsize=8)  # Smaller legend
+
         ax2.plot(epoch_accuracies, label='Accuracy per Epoch', marker='o')
-        ax2.set_title('Training Accuracy Over Epochs')
-        ax2.set_xlabel('Epoch')
-        ax2.set_ylabel('Accuracy')
-        ax2.legend()
+        ax2.set_title('Training Accuracy Over Epochs', fontsize=8)  # Smaller title
+        ax2.set_xlabel('Epoch', fontsize=6)  # Smaller x-label
+        ax2.set_ylabel('Accuracy', fontsize=6)  # Smaller y-label
+        ax2.legend(fontsize=8)  # Smaller legend
+
+        # Adjust tick parameters for smaller size
+        ax1.tick_params(axis='both', which='major', labelsize=8)
+        ax2.tick_params(axis='both', which='major', labelsize=8)
+
         canvas.draw()
+
 
     dataset_train, dataset_test, dict_party_user, _ = get_dataset(args)
 
@@ -266,7 +276,7 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
 
 def create_gui(args):
     root = tk.Tk()
-    root.title('Federated Learning Simulation')
+    root.title('Federated Learning Simulation with CKKS Encryption')
 
     custom_font = font.Font(family="San Francisco", size=16)
     text_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=50, height=10, font=custom_font)
