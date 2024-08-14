@@ -16,7 +16,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.animation as animation
 import tenseal as ts
 
-from models.Nets import MLP, Mnistcnn
+from models.Nets import MLP, Mnistcnn, Cifar10cnn
 from models.Update import LocalUpdate
 from models.test import test_fun
 from utils.dataset import get_dataset, exp_details
@@ -187,8 +187,14 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
 
     dataset_train, dataset_test, dict_party_user, _ = get_dataset(args)
 
-    if args.model == 'cnn' and args.dataset == 'MNIST':
-        net_glob = Mnistcnn(args=args).to(args.device)
+    if args.model == 'cnn':
+        if args.dataset == 'MNIST':
+            net_glob = Mnistcnn(args=args).to(args.device)
+        elif args.dataset == 'CIFAR10':
+            net_glob = Cifar10cnn(args=args).to(args.device)  # Assuming Cifar10cnn is your CNN model for CIFAR-10
+        else:
+            update_text('Error: unrecognized dataset for CNN model', text_widget)
+            return
     elif args.model == 'mlp':
         len_in = 1
         for dim in dataset_train[0][0].shape:
@@ -197,6 +203,7 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
     else:
         update_text('Error: unrecognized model', text_widget)
         return
+
 
     update_text('Federated Learning Simulation started. Initializing model architecture...\n', text_widget)
     update_text('Model architecture loaded and initialized. Starting training process on dataset: ' + args.dataset + '\n', text_widget)
