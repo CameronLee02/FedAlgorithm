@@ -19,11 +19,12 @@ import tenseal as ts
 from models.Nets import MLP, Mnistcnn
 from models.Update import LocalUpdate
 from models.test import test_fun
-from utils.dataset_limit import get_dataset, exp_details
+from utils.dataset import get_dataset, exp_details
 from utils.options import args_parser
 
 # CKKS Context Setup
 def create_ckks_context():
+    '''Function to create a CKKS context with the specified parameters'''
     context = ts.context(
         ts.SCHEME_TYPE.CKKS,
         poly_modulus_degree=16384,
@@ -38,6 +39,7 @@ def update_text(message, text_widget):
     text_widget.see(tk.END)
 
 def check_for_nan(weights_dict, description, text_widget):
+    '''Some context NaN values can appear, check for them'''
     for name, weight in weights_dict.items():
         if torch.isnan(weight).any():
             update_text(f"NaN detected in {description}: {name}", text_widget)
@@ -45,11 +47,13 @@ def check_for_nan(weights_dict, description, text_widget):
     return False
 
 def log_weight_stats(weights_dict, description, text_widget):
+    '''Log the mean, max, and min of the weights'''
     for name, weight in weights_dict.items():
         weight_np = weight.cpu().numpy()
         update_text(f"{description} - {name}: mean={weight_np.mean():.4f}, max={weight_np.max():.4f}, min={weight_np.min():.4f}", text_widget)
 
 def encrypt_weights(weights_dict, context, text_widget, chunk_size=1000):
+    '''Encrypt the weights using CKKS encryption'''
     update_text("Encrypting weights using CKKS encryption...", text_widget)
     encrypted_weights = {}
     for name, weight in weights_dict.items():
@@ -66,12 +70,13 @@ def encrypt_weights(weights_dict, context, text_widget, chunk_size=1000):
     return encrypted_weights
 
 def decrypt_weights(encrypted_weights, context, original_shapes, text_widget, client_count):
+    '''Decrypt the weights using CKKS decryption'''
     update_text("Decrypting aggregated weights using CKKS decryption...", text_widget)
     decrypted_weights = {}
-    for name, enc_weight_chunks in encrypted_weights.items():
+    for name, enc_weight_chunks in encrypted_weights.items(): # Iterate over each weight
         decrypted_flat = []
         for enc_weight in enc_weight_chunks:
-            decrypted_flat.extend(enc_weight.decrypt())
+            decrypted_flat.extend(enc_weight.decrypt()) # Decrypt each chunk and flatten
 
         # Apply the averaging by dividing by client_count during decryption
         decrypted_array = (np.array(decrypted_flat, dtype=np.float32) / client_count).reshape(original_shapes[name])
@@ -87,6 +92,7 @@ def decrypt_weights(encrypted_weights, context, original_shapes, text_widget, cl
 
 
 def aggregate_encrypted_weights(encrypted_weights1, encrypted_weights2, client_count, text_widget):
+    '''Aggregate the encrypted weights using homomorphic addition'''
     update_text("Aggregating encrypted weights using homomorphic addition...", text_widget)
     aggregated_weights = {}
     for name in encrypted_weights1.keys():
@@ -101,6 +107,7 @@ def aggregate_encrypted_weights(encrypted_weights1, encrypted_weights2, client_c
 
 
 def compare_weights(weights1, weights2, text_widget, client_count):
+    '''Some epochs may return different values between decrypted and true values, compare the weights to see if match'''
     update_text("Comparing decrypted and original weights...", text_widget)
     for name in weights1.keys():
         # Adjust the original weights to account for the averaging
@@ -111,27 +118,28 @@ def compare_weights(weights1, weights2, text_widget, client_count):
 
 
 def client_training(client_id, dataset_train, dict_party_user, net_glob, text_widget, context, received_encrypted_weights=None):
+    '''Function to train a client on its local dataset'''
     update_text(f'Starting training on client {client_id}', text_widget)
 
-    local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_party_user[client_id])
+    local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_party_user[client_id]) # Initialize local training
 
-    net_glob.load_state_dict(copy.deepcopy(net_glob.state_dict()))
+    net_glob.load_state_dict(copy.deepcopy(net_glob.state_dict())) # Load the global model
 
-    local_weights, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
+    local_weights, loss = local.train(net=copy.deepcopy(net_glob).to(args.device)) # Perform training
 
-    if check_for_nan(local_weights, f"Client {client_id} local weights after training", text_widget):
+    if check_for_nan(local_weights, f"Client {client_id} local weights after training", text_widget): # Check for NaN values
         raise ValueError(f"NaN detected in Client {client_id} local weights after training.")
 
     update_text(f'Client {client_id} has completed training. Loss: {loss:.4f}', text_widget)
 
-    log_weight_stats(local_weights, f"Client {client_id} local weights before encryption", text_widget)
+    log_weight_stats(local_weights, f"Client {client_id} local weights before encryption", text_widget) # Log the weights
 
-    if check_for_nan(local_weights, f"Client {client_id} local weights before encryption", text_widget):
+    if check_for_nan(local_weights, f"Client {client_id} local weights before encryption", text_widget): # Check for NaN values
         raise ValueError(f"NaN detected in Client {client_id} local weights before encryption.")
 
-    encrypted_weights = encrypt_weights(local_weights, context, text_widget)
+    encrypted_weights = encrypt_weights(local_weights, context, text_widget) # Encrypt the weights
 
-    if received_encrypted_weights is not None:
+    if received_encrypted_weights is not None: # If there are already aggregated weights
         update_text(f'Client {client_id} is aggregating received encrypted weights.', text_widget)
         encrypted_weights = aggregate_encrypted_weights(encrypted_weights, received_encrypted_weights, text_widget)
 
@@ -139,6 +147,7 @@ def client_training(client_id, dataset_train, dict_party_user, net_glob, text_wi
     return encrypted_weights, local_weights, loss  # Return both encrypted and unencrypted weights
 
 def threaded_client_training(client_id, dataset_train, dict_party_user, net_glob, context, text_widget, received_encrypted_weights, results):
+    '''Threaded function to train a client on its local dataset'''
     encrypted_weights, local_weights, loss = client_training(
         client_id,
         dataset_train,
@@ -151,6 +160,7 @@ def threaded_client_training(client_id, dataset_train, dict_party_user, net_glob
     results[client_id] = (encrypted_weights, local_weights, loss)
 
 def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
+    '''Sequential Federated Learning Algorithm with CKKS Encryption'''
     def update_plots(epoch_losses, epoch_accuracies):
         ax1.clear()
         ax2.clear()
@@ -194,12 +204,12 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
 
     context = create_ckks_context()
 
-    net_glob.train()
+    net_glob.train() # Set the model to training mode
 
-    epoch_losses = []
-    epoch_accuracies = []
+    epoch_losses = [] # Store the loss per epoch
+    epoch_accuracies = [] # Store the accuracy per epoch
 
-    for iter in range(args.epochs):
+    for iter in range(args.epochs): # Number of global rounds
         update_text(f'+++ Epoch {iter + 1} starts +++', text_widget)
         idxs_users = list(range(args.num_users))
         np.random.shuffle(idxs_users)
@@ -215,8 +225,8 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         threads = []
         client_count = 0  # Initialize client count for averaging
 
-        for idx, user in enumerate(idxs_users):
-            thread = threading.Thread(
+        for idx, user in enumerate(idxs_users): # Iterate over each client
+            thread = threading.Thread( # Create a thread for each client
                 target=threaded_client_training,
                 args=(user, dataset_train, dict_party_user, net_glob, context, text_widget, received_encrypted_weights, results)
             )
@@ -226,7 +236,7 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         for thread in threads:
             thread.join()
 
-        for idx, user in enumerate(idxs_users):
+        for idx, user in enumerate(idxs_users): # Iterate over each client
             encrypted_weights, local_weights, loss = results[user]
             client_count += 1  # Increment the number of clients after each aggregation
 
@@ -244,7 +254,7 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
             local_losses.append(loss)
 
         update_text('Final client sending aggregated encrypted weights to server.', text_widget)
-        decrypted_weights = decrypt_weights(received_encrypted_weights, context, original_shapes, text_widget, client_count)
+        decrypted_weights = decrypt_weights(received_encrypted_weights, context, original_shapes, text_widget, client_count) # Decrypt the weights
 
 
         if check_for_nan(decrypted_weights, "Global Model Weights", text_widget):
@@ -260,21 +270,22 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         #net_glob.load_state_dict(received_unencrypted_weights)
         update_text('Server has updated the global model with final aggregated weights.', text_widget)
 
-        net_glob.eval()
-        acc_train, _ = test_fun(net_glob, dataset_train, args)
-        epoch_losses.append(np.mean(local_losses))
-        epoch_accuracies.append(acc_train)
+        net_glob.eval() # Set the model to evaluation mode
+        acc_train, _ = test_fun(net_glob, dataset_train, args) # Test the model on the training data
+        epoch_losses.append(np.mean(local_losses)) # Store the loss
+        epoch_accuracies.append(acc_train) # Store the accuracy
 
         update_text(f'Epoch {iter + 1} completed. Train Acc: {acc_train:.2f}', text_widget)
         update_plots(epoch_losses, epoch_accuracies)
         update_text('---\n', text_widget)
 
-    exp_details(args)
+    exp_details(args) # Log the experimental details
     update_text('Training complete. Summary of results:', text_widget)
     update_text(f'Final Training Accuracy: {acc_train:.2f}', text_widget)
 
 
 def create_gui(args):
+    '''Create a GUI for the Federated Learning Simulation'''
     root = tk.Tk()
     root.title('Federated Learning Simulation with CKKS Encryption')
 
