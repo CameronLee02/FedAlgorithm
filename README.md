@@ -3,8 +3,8 @@ Forked Repository from SIA project of FL to custom algorithm on Federated Learni
 
 # Three main file:
 
-main_fed_sequential.py: No Homomorphic Encryption, series based custom algorithm <br>
-main_fed_sequential_threaded.py: No Homomorphic Encryption, series based custom algorithm (THREADING ENABLED) <br>
+main_fed_sequential.py: No Homomorphic Encryption, series based custom algorithm (MNIST SUPPORT ONLY) <br> 
+main_fed_sequential_threaded.py: No Homomorphic Encryption, series based custom algorithm (THREADING ENABLED) (MNIST SUPPORT ONLY) <br>
 main_fed_sequential_threaded_ckks_updated.py: CKKS Partial Addition Homomorphic Encryption, series based custom algorithm (THREADING ENABLED) <br>
 
 ## For Speed purposes:
