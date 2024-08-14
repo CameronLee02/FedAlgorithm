@@ -30,6 +30,13 @@ Python TenSEAL library required for CKKS file, current setup uses Python Version
 # Implementation
 
 You can try different `--alpha` (data distribution), `--num_users`(number of parties), `--local_ep` (number of local epochs) to see how the attack performance changes. For `MNIST` dataset, we set `--model=cnn`.
+
+## For MNIST
 ```python
 python main_fed_sequential_threaded_ckks_updated.py --dataset=MNIST --model=cnn --alpha=1 --num_users=6 --local_ep=5
+```
+
+## For CIFAR-10
+```python
+python main_fed_sequential_threaded_ckks_updated.py --dataset=CIFAR10 --model=cnn --alpha=1 --num_users=6 --local_ep=5
 ```
