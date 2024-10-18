@@ -119,7 +119,7 @@ def graphMultipleNodePercentageRange(nMin, nMax):
     plt.legend(legendvalues, loc="lower right")
     plt.show()
 
-#graphs the prob of a single node bing targeted in a range of 'n' sample sizes with the same proportion 'm' malicious nodes
+#graphs the prob of a single node being targeted in a range of 'n' sample sizes with the same 'm' malicious nodes
 def graphMultipleNodePercentageSameM(nMin, nMax, m):
     yValues = []
     for i in range(nMin,nMax+1):
@@ -131,6 +131,24 @@ def graphMultipleNodePercentageSameM(nMin, nMax, m):
     plt.xticks(xValues)
     plt.title(f"Percentage of an Attack Occuring on Different Sample Sizes with {m} Malicious Nodes")
     plt.show()
+
+#graphs the prob of a single node being targeted in a range of 'n' sample sizes with the same proportion'm' malicious nodes
+#m must be between 0 and 100. eg 50 is equal to 50%
+#nMin cannot be lower than 10
+def graphMultileNodeSamePercentageOfM(nMin, nMax, mPercent):
+    yValues = []
+    for i in range(nMin,nMax+1):
+        m = i * (mPercent/100)
+        value = singleNodePercentageEquation(i,m)
+        yValues.append(value)
+    xValues = np.arange(nMin, nMax+1)
+    plt.plot(xValues, yValues, marker = 'o')
+    plt.xlabel("Sample Size")
+    plt.ylabel("Percentage of an Attack Occuring")
+    plt.xticks(xValues)
+    plt.title(f"Percentage of an Attack Occuring on Different Sample Sizes with a Percentage of {mPercent}% Malicious Nodes")
+    plt.show()
+
 
 
 #graphSingleNodePercentageRange(13)
