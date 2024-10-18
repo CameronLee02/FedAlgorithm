@@ -3,7 +3,6 @@ import time
 import random
 import hashlib 
 
-
 #Client node class that acts as the local clients participating in FL
 class ClientNodeClass(threading.Thread):
     def __init__(self, node_id, network, malicous):
@@ -13,7 +12,9 @@ class ClientNodeClass(threading.Thread):
         self.malicous = malicous
         self.node_list = None
         self.pow_volunteer = None
+        self.route_volunteer = None
         self.pow_volunteer_available = True
+        self.route_volunteer_available = True
 
     def receiveMessage(self, sender_id, message):
         if len(message.keys()) != 1:
@@ -22,24 +23,32 @@ class ClientNodeClass(threading.Thread):
         #NODE_LIST message contains a list of all the participating nodes. node checks if its from the central server.
         #assume server node id = 0 for this program
         if "NODE_LIST" in message.keys() and sender_id == 0:
-            self.node_list = message["NODE_LIST"].copy()
+            self.node_list = message["NODE_LIST"]["NODES"].copy()
+            test_type = message["NODE_LIST"]["TEST_TYPE"]
 
             #checks if it is in the list. if it isn't, ignore the message (invalid/untrusted list from server)
             if self.node_id not in self.node_list: 
                 return
             #removes itself from list so it doesn't send messages to itself
             self.node_list.remove(self.node_id)
-            self.validateNodesOnList()
+            self.validateNodesOnList(test_type)
+        
+        if "ROUTE_PARAMETERS" in message.keys() and sender_id in self.node_list:
+            self.route_volunteer_available = False
+            self.route_volunteer = sender_id
+            algorithm = message["ROUTE_PARAMETERS"]
+            print(f"Node {self.node_id} has received the algorithm {algorithm}")
+            self.routeValue = int(random.uniform(1000000000, 10000000000)) # generate a random value to use
+            hash = self.calculateHash(self.routeValue, None, algorithm)
 
-        #PoW_VOLUNTEER message contains the volunteering node_id that will give a PoW to every other node
-        if "PoW_VOLUNTEER" in message.keys() and sender_id in self.node_list:
-            self.pow_volunteer_available = False
-            self.pow_volunteer = sender_id
-            print(f"Node {self.node_id} agrees")
+            print(f"{self.node_id} finshed their hash: {hash}")
+            self.network.messageSingleNode(self.node_id, sender_id, {"ROUTE_RESULTS": hash})
 
         #PoW_PARAMETERS message contains the parameters for the PoW (the arbitrary number, num of leading 0's, hashing algorithm)
         #this section also performs the PoW 
-        if "PoW_PARAMETERS" in message.keys() and sender_id in self.node_list and sender_id == self.pow_volunteer:
+        if "PoW_PARAMETERS" in message.keys() and sender_id in self.node_list:
+            self.pow_volunteer_available = False
+            self.pow_volunteer = sender_id
             parameters = message["PoW_PARAMETERS"]
             print(f"Node {self.node_id} has received the parameters {parameters}")
             print(f"Started PoW for {self.node_id}")
@@ -50,9 +59,12 @@ class ClientNodeClass(threading.Thread):
             self.network.messageSingleNode(self.node_id, sender_id, {"PoW_RESULTS": {"NONCE": nonce}})
         
         #PoW_RESULTS message contains the results from the PoW of a particular node. Contains the dict {HASH, NONCE}
-        if "PoW_RESULTS" in message.keys() and sender_id in self.node_list and sender_id in self.pow_parameters.keys() and self.node_id == self.pow_volunteer:
+        if "PoW_RESULTS" in message.keys() and sender_id in self.node_list and sender_id in self.pow_parameters.keys():
             self.times[sender_id]["TIME_END"] = time.time()
             self.pow_parameters[sender_id].update(message["PoW_RESULTS"])
+        
+        if "ROUTE_RESULTS" in message.keys() and sender_id in self.node_list:
+            self.route_results[sender_id] = message["ROUTE_RESULTS"]
 
     def proofOfWork(self, parameters):
         nonce = 0
@@ -63,15 +75,58 @@ class ClientNodeClass(threading.Thread):
 
         return hash, nonce
                     
-    def validateNodesOnList(self):
+    def validateNodesOnList(self, test_type):
         #simulate the node waiting a random time
         time.sleep(random.uniform(1, 5))
-        if self.pow_volunteer_available == True:
+        if test_type == "pow" and self.pow_volunteer_available == True and self.node_id == 1: #making 1 also be volunteer due to latency in 'transmissions', which causes multiple nodes to volunteer
             print(f"Node {self.node_id} can volunteer to create PoW")
-            self.network.messageAllNodesExcludeServer(self.node_id, {"PoW_VOLUNTEER": self.node_id})
+            self.proofOfWorkVolunteer()
             self.pow_volunteer_available == False
             self.pow_volunteer = self.node_id
-            self.proofOfWorkVolunteer()
+        elif test_type == "route" and self.route_volunteer_available == True and self.node_id == 1:
+            print(f"Node {self.node_id} can volunteer to lead in-house route calculation")
+            self.routeVolunteer()
+            self.route_volunteer_available == False
+            self.route_volunteer = self.node_id
+    
+    def routeVolunteer(self):
+        algorithm = "sha256" #Can add more hashing algorithms to improve security. malicious nodes are less likely to have pre hashed values if diff type of algorithms can be used
+        
+        self.route_results = {}
+        threads = []
+        for node in self.node_list:
+            print(f"Sending algorithm to node {node}")
+            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"ROUTE_PARAMETERS": algorithm}))
+            t.start()
+            threads.append(t)
+        
+        #route volunteer must make their own hash as well as this defines the order of the chain
+        self.routeValue = int(random.uniform(1000000000, 10000000000)) # generate a random value to use
+        hash = self.calculateHash(self.routeValue, None, algorithm)
+        self.route_results[self.node_id] = hash
+        
+        for t in threads:
+            t.join()
+        
+        totalValue = {}
+        for key, value in self.route_results.items():
+            print(f"Node {key} provided the hash value: {value}")
+            total = 0
+            for char in value:
+                if not char.isalpha():
+                    total += int(char)
+                else:
+                    total += ord(char)
+            totalValue[key] = total
+            print(f"Total: {total}")
+        print(totalValue)
+
+        print("--------------------------Ordering all hashing values in ascending order--------------------------")
+        sorted_items = dict(sorted(totalValue.items(), key=lambda item: item[1]))
+        print(sorted_items)
+        for key, value in sorted_items.items():
+            print(f"Node {key} provided the hash value: {value}")
+        
     
     def proofOfWorkVolunteer(self):
         self.pow_parameters = {}
@@ -113,11 +168,18 @@ class ClientNodeClass(threading.Thread):
             else:
                 print(f"Node {key}'s PoW is correct with the time of: {time_taken}")
     
+    #can add different hash algorithms later if needed
     def calculateHash(self, parameter, nonce, algorithm):
-        if algorithm == 'sha256':
-            sha = hashlib.sha256()
-            sha.update(str(parameter).encode('utf-8') + str(nonce).encode('utf-8'))
-            return sha.hexdigest()
+        if nonce != None:
+            if algorithm == 'sha256':
+                sha = hashlib.sha256()
+                sha.update(str(parameter).encode('utf-8') + str(nonce).encode('utf-8'))
+                return sha.hexdigest()
+        else:
+            if algorithm == 'sha256':
+                sha = hashlib.sha256()
+                sha.update(str(parameter).encode('utf-8'))
+                return sha.hexdigest()
     
     def checkStatus(self):
         print("still alive")
