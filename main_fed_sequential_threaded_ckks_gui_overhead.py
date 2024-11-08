@@ -10,6 +10,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import tenseal as ts
 import platform
 import psutil  # For system information
+import networkx as nx
 from models.Nets import MLP, Mnistcnn, Cifar10cnn
 from models.Update import LocalUpdate
 from models.test import test_fun
@@ -100,7 +101,7 @@ def aggregate_encrypted_weights(encrypted_weights1, encrypted_weights2, client_c
     overhead_info["aggregation_times"].append(aggregation_time)
     return aggregated_weights
 
-def client_training(client_id, dataset_train, dict_party_user, net_glob, text_widget, context, received_encrypted_weights=None):
+def client_training(client_id, dataset_train, dict_party_user, net_glob, text_widget, context, G, visualisation_canvas, visualisation_ax, colours, pos, received_encrypted_weights=None):
     update_text(f'Starting training on client {client_id}', text_widget)
 
     local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_party_user[client_id])
@@ -119,6 +120,11 @@ def client_training(client_id, dataset_train, dict_party_user, net_glob, text_wi
     if check_for_nan(local_weights, f"Client {client_id} local weights after training", text_widget):
         raise ValueError(f"NaN detected in Client {client_id} local weights after training.")
 
+    #used to update the route/progress visualisation
+    clients_index = list(G.nodes()).index(client_id)
+    colours[clients_index] = "orange"
+    update_display_network(G, visualisation_canvas, visualisation_ax, colours, pos)
+
     update_text(f'Client {client_id} has completed training. Loss: {loss:.4f}', text_widget)
     log_weight_stats(local_weights, f"Client {client_id} local weights before encryption", text_widget)
 
@@ -131,10 +137,12 @@ def client_training(client_id, dataset_train, dict_party_user, net_glob, text_wi
     # Aggregation with previously received encrypted weights (if applicable)
     if received_encrypted_weights is not None:
         encrypted_weights = aggregate_encrypted_weights(encrypted_weights, received_encrypted_weights, 2, text_widget)
+        colours[clients_index] = "green"
+        update_display_network(G, visualisation_canvas, visualisation_ax, colours, pos)
 
     return encrypted_weights, local_weights, loss
 
-def threaded_client_training(client_id, dataset_train, dict_party_user, net_glob, context, text_widget, received_encrypted_weights, results):
+def threaded_client_training(client_id, dataset_train, dict_party_user, net_glob, context, text_widget, received_encrypted_weights, results, G, visualisation_canvas, visualisation_ax, colours, pos):
     encrypted_weights, local_weights, loss = client_training(
         client_id,
         dataset_train,
@@ -142,6 +150,11 @@ def threaded_client_training(client_id, dataset_train, dict_party_user, net_glob
         net_glob,
         text_widget,
         context,
+        G, #this parameter and below are used for route visualisation except received_encrypted_weights
+        visualisation_canvas,
+        visualisation_ax,
+        colours,
+        pos,
         received_encrypted_weights
     )
     results[client_id] = (encrypted_weights, local_weights, loss)
@@ -165,7 +178,24 @@ overhead_info = {
     }
 }
 
-def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
+def display_network(clients, visualisation_canvas, visualisation_ax):
+    edge = []
+    colours = ["red"] * len(clients)
+    for i in range(1,len(clients)):
+        edge.append((clients[i-1], clients[i]))
+    G = nx.Graph()
+    G.add_nodes_from(clients)
+    G.add_edges_from(edge)
+    pos ={node: (i, 0) for i, node in enumerate(G.nodes())}
+    nx.draw(G, pos, with_labels=True, node_size=800, node_color=colours, font_size=10, font_weight="bold", edge_color="gray", ax=visualisation_ax)
+    visualisation_canvas.draw()
+    return colours, pos, G
+
+def update_display_network(G, visualisation_canvas, visualisation_ax, colours, pos):
+    nx.draw(G, pos, with_labels=True, node_size=800, node_color=colours, font_size=10, font_weight="bold", edge_color="gray", ax=visualisation_ax)
+    visualisation_canvas.draw()
+
+def sequential_process(args, text_widget, ax1, ax2, fig, canvas, visualisation_canvas, visualisation_ax):
     def update_plots(epoch_losses, epoch_accuracies):
         ax1.clear()
         ax2.clear()
@@ -223,12 +253,13 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
     epoch_accuracies = []
 
     start_total_time = time.time()
-
+    
     for iter in range(args.epochs):
         epoch_start_time = time.time()
         update_text(f'+++ Epoch {iter + 1} starts +++', text_widget)
         idxs_users = list(range(args.num_users))
         np.random.shuffle(idxs_users)
+        colours, pos, G = display_network(idxs_users, visualisation_canvas, visualisation_ax)
 
         local_losses = []
         original_shapes = {name: weight.shape for name, weight in net_glob.state_dict().items()}
@@ -240,7 +271,7 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         for idx, user in enumerate(idxs_users):
             thread = threading.Thread(
                 target=threaded_client_training,
-                args=(user, dataset_train, dict_party_user, net_glob, context, text_widget, received_encrypted_weights, results)
+                args=(user, dataset_train, dict_party_user, net_glob, context, text_widget, received_encrypted_weights, results, G, visualisation_canvas, visualisation_ax, colours, pos)
             )
             threads.append(thread)
             thread.start()
@@ -263,6 +294,8 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
                 )
             else:
                 received_encrypted_weights = encrypted_weights
+            colours[idx] = "green"
+            update_display_network(G, visualisation_canvas, visualisation_ax, colours, pos)
 
             local_losses.append(loss)
 
@@ -288,6 +321,8 @@ def sequential_process(args, text_widget, ax1, ax2, fig, canvas):
         epoch_end_time = time.time()
         epoch_duration = epoch_end_time - epoch_start_time
         overhead_info["epoch_times"].append(epoch_duration)
+        visualisation_ax.clear() #used to clear/reset the network visualisation window
+        visualisation_canvas.draw()
 
     overhead_info["total_time"] = time.time() - start_total_time
 
@@ -338,34 +373,75 @@ def show_results_window(info):
 
     results_text.config(state=tk.DISABLED)
 
+class GUI():
+    def __init__(self, args):
+        self.args = args
 
-def create_gui(args):
-    '''Create the GUI window for the Federated Learning process'''
-    root = tk.Tk()
-    root.title('Federated Learning Simulation with CKKS Encryption')
+    def create_gui(self):
+        '''Create the GUI window for the Federated Learning process'''
+        root = tk.Tk()
+        root.title('Federated Learning Simulation with CKKS Encryption')
 
-    custom_font = font.Font(family="San Francisco", size=16)
-    text_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=50, height=10, font=custom_font)
-    text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        custom_font = font.Font(family="San Francisco", size=16)
+        text_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=50, height=10, font=custom_font)
+        text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8))
-    canvas = FigureCanvasTkAgg(fig, master=root)
-    canvas.get_tk_widget().pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        self.visualisation_window = tk.Toplevel(root)
+        self.visualisation_window.minsize(800,600)
+        self.visualisation_window.title("Route Visualisation Window")
+        self.visualisation_window.protocol("WM_DELETE_WINDOW", lambda: None)
+        self.visualisation_window.withdraw()
 
-    def run_learning_process():
-        start_time = time.time()
-        sequential_process(args, text_area, ax1, ax2, fig, canvas)
-        total_time = time.time() - start_time
-        text_area.insert(tk.END, f"Total time for completion: {total_time / 60:.2f} minutes.")
+        frame = tk.Frame(self.visualisation_window)
+        frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-    thread = threading.Thread(target=run_learning_process)
-    thread.start()
+        l1 = tk.Label(frame, text = "Red -> Currently Training", fg="red")
+        l1.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
+        l2 = tk.Label(frame, text = "Orange -> Finished Training, Waiting for Aggregation", fg="orange")
+        l2.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
+        l3 = tk.Label(frame, text = "Green -> Finished Aggregation", fg="green")
+        l3.pack(side=tk.LEFT, expand=True, fill=tk.BOTH)
 
-    root.mainloop()
+        fig, visualisation_ax = plt.subplots(figsize=(6, 4))
+        visualisation_ax.set_title("Route Visualization")
+        visualisation_canvas = FigureCanvasTkAgg(fig, master=self.visualisation_window)
+        visualisation_canvas.get_tk_widget().pack(side=tk.BOTTOM, fill=tk.BOTH, expand=True)
+
+        def open_route_visualisation():
+            if self.visualisation_window.state() == "withdrawn":
+                self.visualisation_window.deiconify()
+            else:
+                print("Cannot open Visualisation Window. It is already open")
+
+        frame = tk.Frame(root, bg='lightblue')
+        frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+
+        route_visualisation_btn = tk.Button(frame, 
+            text ="Click to open Route Visualisation Window", 
+            command = open_route_visualisation)
+        
+        route_visualisation_btn.pack(side=tk.BOTTOM, padx=10, pady=5)
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 8))
+        canvas = FigureCanvasTkAgg(fig, master=frame)
+        canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+
+
+        def run_learning_process():
+            start_time = time.time()
+            sequential_process(self.args, text_area, ax1, ax2, fig, canvas, visualisation_canvas, visualisation_ax)
+            total_time = time.time() - start_time
+            text_area.insert(tk.END, f"Total time for completion: {total_time / 60:.2f} minutes.")
+
+        thread = threading.Thread(target=run_learning_process)
+        thread.start()
+
+        root.mainloop()
 
 if __name__ == '__main__':
     args = args_parser()
     args.device = torch.device('cuda:{}'.format(args.gpu) if torch.cuda.is_available() and args.gpu != -1 else 'cpu')
-    create_gui(args)
+    gui = GUI(args)
+    gui.create_gui()
 
 # End of File

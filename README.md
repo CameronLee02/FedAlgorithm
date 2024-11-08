@@ -26,7 +26,7 @@ For example, using dataset_limit with a limit of 1000 sample will have its simul
 
 # IMPORTANT
 
-Python TenSEAL library required for CKKS file, current setup uses Python Version 3.9 to properly install all requirements. More up to date python versions may cause TenSEAL library to not install properly.
+Python TenSEAL library required for CKKS file, current setup uses Python Version 3.9 to properly install all requirements. More up to date python versions may cause TenSEAL library to not install properly. Requirements.txt states to use numpy 2.0.1. If this doesn't work, use numpy 1.26.4
 
 
 # Implementation
