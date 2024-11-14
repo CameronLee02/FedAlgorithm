@@ -47,6 +47,10 @@ class ServerNodeClass(threading.Thread):
     def receiveMessage(self, sender_id, message, receiver_id):
         if len(message.keys()) != 1:
             return
+        
+        if "VALIDATED_NODE_ROUTE" in message.keys() and sender_id in self.real_node_list:
+            route = message["VALIDATED_NODE_ROUTE"]
+            print(route)
 
         if "NODE_LIST" in message.keys() and sender_id == 0:
             #Server doesn't need to check if node_list is valid a it is acting maliciously by pretending to be another node

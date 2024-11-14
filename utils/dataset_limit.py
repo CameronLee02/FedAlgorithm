@@ -24,7 +24,7 @@ def get_dataset(args):
         test_dataset = datasets.MNIST(data_dir, train=False, download=True,
                                       transform=apply_transform)
         # sample non-iid data
-        dict_party_user, dict_sample_user = sample_dirichlet_train_data(train_dataset, args.num_users, args.num_samples,
+        dict_party_user, dict_sample_user = sample_dirichlet_train_data(train_dataset, args.num_users+1, args.num_samples,
                                                                         args.alpha)
 
 
@@ -53,7 +53,7 @@ def get_dataset(args):
         test_dataset = Subset(test_dataset, test_indices)
 
         # Sample non-IID data
-        dict_party_user, dict_sample_user = sample_dirichlet_train_data(train_dataset, args.num_users, args.num_samples,
+        dict_party_user, dict_sample_user = sample_dirichlet_train_data(train_dataset, args.num_users+1, args.num_samples,
                                                                         args.alpha)
 
     elif args.dataset == 'Synthetic' and args.iid == True:
@@ -75,7 +75,7 @@ def get_dataset(args):
         test_dataset = Subset(test_dataset, test_indices)
 
         # Sample IID data
-        dict_party_user, dict_sample_user = synthetic_iid(train_dataset, args.num_users, args.num_samples)
+        dict_party_user, dict_sample_user = synthetic_iid(train_dataset, args.num_users+1, args.num_samples)
 
     elif args.dataset == 'Synthetic' and args.iid == False:
         data_dir = './data/synthetic/synthetic_x_0.npz'
@@ -96,7 +96,7 @@ def get_dataset(args):
         test_dataset = Subset(test_dataset, test_indices)
 
         # Sample non-IID data
-        dict_party_user, dict_sample_user = sample_dirichlet_train_data(train_dataset, args.num_users, args.num_samples,
+        dict_party_user, dict_sample_user = sample_dirichlet_train_data(train_dataset, args.num_users+1, args.num_samples,
                                                                         args.alpha)
 
     else:

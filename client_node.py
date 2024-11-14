@@ -2,18 +2,18 @@ import threading
 import time
 import random
 import hashlib 
+import copy
+
+from models.Update import LocalUpdate
 
 #Client node class that acts as the local clients participating in FL
-class ClientNodeClass(threading.Thread):
-    def __init__(self, node_id, network, malicous):
+class ClientNodeClass():
+    def __init__(self, node_id, network):
         super().__init__()
         self.node_id = node_id
         self.network = network
-        self.malicous = malicous
         self.node_list = None
-        self.pow_volunteer = None
         self.route_volunteer = None
-        self.pow_volunteer_available = True
         self.route_volunteer_available = True
 
     def receiveMessage(self, sender_id, message):
@@ -23,15 +23,14 @@ class ClientNodeClass(threading.Thread):
         #NODE_LIST message contains a list of all the participating nodes. node checks if its from the central server.
         #assume server node id = 0 for this program
         if "NODE_LIST" in message.keys() and sender_id == 0:
-            self.node_list = message["NODE_LIST"]["NODES"].copy()
-            test_type = message["NODE_LIST"]["TEST_TYPE"]
+            self.node_list = message["NODE_LIST"].copy()
 
             #checks if it is in the list. if it isn't, ignore the message (invalid/untrusted list from server)
             if self.node_id not in self.node_list: 
                 return
             #removes itself from list so it doesn't send messages to itself
             self.node_list.remove(self.node_id)
-            self.validateNodesOnList(test_type)
+            self.beginRouteProcedure()
         
         #ROUTE_PARAMETERS message is set from the route volunteer to all the other nodes and contains the information 
         #needed to generate a hash value for each in-house route operation
@@ -45,25 +44,6 @@ class ClientNodeClass(threading.Thread):
 
             print(f"{self.node_id} finshed their hash: {self.route_hash}")
             self.network.messageSingleNode(self.node_id, sender_id, {"ROUTE_RESULTS": self.route_hash})
-
-        #PoW_PARAMETERS message contains the parameters for the PoW (the arbitrary number, num of leading 0's, hashing algorithm)
-        #this section also performs the PoW 
-        if "PoW_PARAMETERS" in message.keys() and sender_id in self.node_list:
-            self.pow_volunteer_available = False
-            self.pow_volunteer = sender_id
-            parameters = message["PoW_PARAMETERS"]
-            print(f"Node {self.node_id} has received the parameters {parameters}")
-            print(f"Started PoW for {self.node_id}")
-
-            hash, nonce = self.proofOfWork(parameters)
-
-            print(f"{self.node_id} finshed their proof of work: {hash}")
-            self.network.messageSingleNode(self.node_id, sender_id, {"PoW_RESULTS": {"NONCE": nonce}})
-        
-        #PoW_RESULTS message contains the results from the PoW of a particular node. Contains the dict {HASH, NONCE}
-        if "PoW_RESULTS" in message.keys() and sender_id in self.node_list and sender_id in self.pow_parameters.keys():
-            self.times[sender_id]["TIME_END"] = time.time()
-            self.pow_parameters[sender_id].update(message["PoW_RESULTS"])
         
         #ROUTE_RESULTS message contains the results from each nodes route hash operation. This is collected by the Route Volunteer
         if "ROUTE_RESULTS" in message.keys() and sender_id in self.node_list:
@@ -130,24 +110,12 @@ class ClientNodeClass(threading.Thread):
             if message["ROUTE_HAPPINESS"] != True: 
                 self.nodes_are_happy_with_route = False
                     
-    def proofOfWork(self, parameters):
-        nonce = 0
-        hash = self.calculateHash(parameters["ARBITRARY_NUMBER"], nonce, parameters["ALGORITHM"])
-        while hash[0:parameters["DIFFICULTY"]] != "0" * parameters["DIFFICULTY"]: 
-            nonce += 1
-            hash = self.calculateHash(parameters["ARBITRARY_NUMBER"], nonce, parameters["ALGORITHM"])
-
-        return hash, nonce
-                    
-    def validateNodesOnList(self, test_type):
+    def beginRouteProcedure(self):
         #simulate the node waiting a random time
-        time.sleep(random.uniform(1, 5))
-        if test_type == "pow" and self.pow_volunteer_available == True and self.node_id == 1: #making 1 also be volunteer due to latency in 'transmissions', which causes multiple nodes to volunteer
-            print(f"Node {self.node_id} can volunteer to create PoW")
-            self.proofOfWorkVolunteer()
-            self.pow_volunteer_available == False
-            self.pow_volunteer = self.node_id
-        elif test_type == "route" and self.route_volunteer_available == True and self.node_id == 1:
+        #time.sleep(random.uniform(1, 5))
+
+        #making 1 be volunteer every reound due to latency in 'transmissions', which causes multiple nodes to volunteer at the same time
+        if self.route_volunteer_available == True and self.node_id == 1:
             print(f"Node {self.node_id} can volunteer to lead in-house route calculation")
             self.routeVolunteer()
             self.route_volunteer_available == False
@@ -197,47 +165,6 @@ class ClientNodeClass(threading.Thread):
             self.network.messageCentralServer(self.node_id, {"VALIDATED_NODE_ROUTE": list(sorted_items.keys())}) #Sends the route to the central server
         else:
             print("Some nodes aren't happy with the route")
-        
-    
-    def proofOfWorkVolunteer(self):
-        self.pow_parameters = {}
-        for node in self.node_list:
-            #paramters of PoW is [Random 10 digit number, number of leading 0's, hashing algorithm]
-            self.pow_parameters[node] = {"ARBITRARY_NUMBER": int(random.uniform(1000000000, 10000000000)), "DIFFICULTY": 5, "ALGORITHM" :'sha256'}
-
-        #sends out the parameters to the nodes via the network
-        threads = []
-        self.times = {}
-        for key, value in self.pow_parameters.items():
-            print(f"Recorded parameters {key}: {value}")
-            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, key, {"PoW_PARAMETERS": value}))
-            t.start()
-            self.times[key] = ({"TIME_START": time.time(), "TIME_END": None})
-            threads.append(t)
-        
-        #PoW volunteer must conduct their own proof of work as well so they can be assigned a partitioned route later on
-        self.pow_parameters[self.node_id] = {"ARBITRARY_NUMBER": int(random.uniform(1000000000, 10000000000)), "DIFFICULTY": 5, "ALGORITHM" :'sha256'}
-        self.times[self.node_id] = ({"TIME_START": time.time(), "TIME_END": None})
-
-        hash, nonce = self.proofOfWork(self.pow_parameters[self.node_id])
-
-        print(f"{self.node_id} finshed their proof of work: {hash}")
-
-        self.times[self.node_id]["TIME_END"] = time.time()
-        self.pow_parameters[self.node_id].update({"NONCE": nonce})
-
-
-        for t in threads:
-            t.join()
-
-        #This part is used to check the PoW of the nodes to make sure they are correct and that they solved it in time
-        for key, value in self.pow_parameters.items():
-            hash = self.calculateHash(value["ARBITRARY_NUMBER"], value["NONCE"], value["ALGORITHM"])
-            time_taken = self.times[key]["TIME_END"] - self.times[key]["TIME_START"]
-            if hash[0:value["DIFFICULTY"]] != "0" * value["DIFFICULTY"]:
-                print(f"Node {key} provided incorrect calculation for the PoW or was too slow in calculating PoW with the time of: {time_taken}")
-            else:
-                print(f"Node {key}'s PoW is correct with the time of: {time_taken}")
     
     #can add different hash algorithms later if needed
     def calculateHash(self, parameter, nonce, algorithm):
@@ -251,6 +178,47 @@ class ClientNodeClass(threading.Thread):
                 sha = hashlib.sha256()
                 sha.update(str(parameter).encode('utf-8'))
                 return sha.hexdigest()
+        
+    def client_training(self, client_id, dataset_train, dict_party_user, net_glob, text_widget, context, args, overhead_info, G, visualisation_canvas, visualisation_ax, colours, pos, received_encrypted_weights=None):
+        self.network.updateText(f'Starting training on client {client_id}', text_widget)
+
+        local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_party_user[client_id])
+
+        # Measure model distribution (downloading the model to the client)
+        start_model_distribution = time.time()
+        net_glob.load_state_dict(copy.deepcopy(net_glob.state_dict()))
+        model_distribution_time = time.time() - start_model_distribution
+        overhead_info["model_distribution_times"].append(model_distribution_time)
+
+        self.network.updateText(f"Model distributed to client {client_id} in {model_distribution_time:.4f} seconds.", text_widget)
+
+        # Training the local model
+        local_weights, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
+
+        if self.network.checkForNan(local_weights, f"Client {client_id} local weights after training", text_widget):
+            raise ValueError(f"NaN detected in Client {client_id} local weights after training.")
+
+        #used to update the route/progress visualisation
+        clients_index = list(G.nodes()).index(client_id)
+        colours[clients_index] = "orange"
+        self.network.updateDisplayNetwork(G, visualisation_canvas, visualisation_ax, colours, pos)
+
+        self.network.updateText(f'Client {client_id} has completed training. Loss: {loss:.4f}', text_widget)
+        self.network.logWeightStats(local_weights, f"Client {client_id} local weights before encryption", text_widget)
+
+        if self.network.checkForNan(local_weights, f"Client {client_id} local weights before encryption", text_widget):
+            raise ValueError(f"NaN detected in Client {client_id} local weights before encryption.")
+
+        # Encryption of local weights
+        encrypted_weights = self.network.encryptWeights(local_weights, context, text_widget)
+
+        # Aggregation with previously received encrypted weights (if applicable)
+        if received_encrypted_weights is not None:
+            encrypted_weights = self.network.aggregate_encrypted_weights(encrypted_weights, received_encrypted_weights, 2, text_widget)
+            colours[clients_index] = "green"
+            self.network.updateDisplayNetwork(G, visualisation_canvas, visualisation_ax, colours, pos)
+
+        return encrypted_weights, local_weights, loss
     
     def checkStatus(self):
         print("still alive")
