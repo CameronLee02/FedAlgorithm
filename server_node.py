@@ -17,6 +17,7 @@ class ServerNodeClass():
     def getNodeList(self, node_list):
         self.node_list = node_list 
     
+    #This function is used to as a way to receive messages from client nodes
     def receiveMessage(self, sender_id, message):
         if len(message.keys()) != 1:
             return
@@ -26,10 +27,7 @@ class ServerNodeClass():
     
     #This function is used to simulate the central server sending a list of the participating to all the nodes 
     def sendOutListOfNodes(self):
-        print("Sending out list of nodes")
-        start = time.time()
         self.network.messageAllNodesExcludeServer(0, {"NODE_LIST" : list(self.node_list.keys())})
-        print(f"Time taken : {time.time()-start}")
     
     # CKKS Context Setup
     def create_ckks_context(self):
@@ -98,8 +96,6 @@ class ServerNodeClass():
             self.network.updateText(f'+++ Epoch {iter + 1} starts +++', text_widget)
 
             self.sendOutListOfNodes()
-            print(self.route)
-            #print(f"Number of threads running rn: {threading.active_count()}")
 
             colours, pos, G = self.network.displayNetwork(self.route, visualisation_canvas, visualisation_ax)
             

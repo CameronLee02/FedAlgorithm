@@ -19,6 +19,8 @@ class NetworkSimulationClass():
         self.args = args
         self.nodes = {}
         self.server_node = None
+        self.route_volunteer = None
+        self.route_volunteer_lock = threading.Lock()
         self.overhead_info = {
             "epoch_times": [],
             "total_time": 0,
@@ -40,7 +42,6 @@ class NetworkSimulationClass():
     #this function is used to send 1 message to 1 node
     def messageSingleNode(self, sender_id, receiver_id ,message):
         if sender_id in self.nodes.keys() and receiver_id in self.nodes.keys():
-            print(f"sending message to {receiver_id}")
             self.nodes[receiver_id].receiveMessage(sender_id, message)
     
     #This function is used to send a message to just the central server node
@@ -177,7 +178,6 @@ class NetworkSimulationClass():
         self.updateText('Model architecture loaded and initialized. Starting training process on dataset: ' + args.dataset + '\n', text_widget)
         self.updatePlots([], [], ax1, ax2, canvas)
 
-        """INSERT SERVER CALL FOR TO START THE TRAINING PROCESS"""
         acc_train = self.server_node.trainingProcess(net_glob, args, dataset_train, dict_party_user, text_widget, visualisation_canvas, visualisation_ax, self.overhead_info, ax1, ax2, canvas)
 
         exp_details(args)
@@ -298,3 +298,12 @@ class NetworkSimulationClass():
     
     def getNodes(self):
         return self.nodes
+    
+    def getRouteVolunteer(self):
+        return self.route_volunteer
+    
+    def getRouteVolunteerLock(self):
+        return self.route_volunteer_lock
+    
+    def setgetRouteVolunteer(self, volunteer):
+        self.route_volunteer = volunteer

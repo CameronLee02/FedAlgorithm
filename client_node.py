@@ -13,9 +13,9 @@ class ClientNodeClass():
         self.node_id = node_id
         self.network = network
         self.node_list = None
-        self.route_volunteer = None
-        self.route_volunteer_available = True
 
+
+    #This function is used to as a way to receive messages from other client nodes or the central server
     def receiveMessage(self, sender_id, message):
         if len(message.keys()) != 1:
             return
@@ -34,15 +34,11 @@ class ClientNodeClass():
         
         #ROUTE_PARAMETERS message is set from the route volunteer to all the other nodes and contains the information 
         #needed to generate a hash value for each in-house route operation
-        if "ROUTE_PARAMETERS" in message.keys() and sender_id in self.node_list:
-            self.route_volunteer_available = False
-            self.route_volunteer = sender_id
+        if "ROUTE_PARAMETERS" in message.keys() and sender_id in self.node_list and sender_id == self.network.getRouteVolunteer():
             self.algorithm = message["ROUTE_PARAMETERS"]
-            print(f"Node {self.node_id} has received the algorithm {self.algorithm}")
             self.route_salt = int(random.uniform(1000000000, 10000000000)) # generate a random value to use
             self.route_hash = self.calculateHash(self.route_salt, None, self.algorithm)
 
-            print(f"{self.node_id} finshed their hash: {self.route_hash}")
             self.network.messageSingleNode(self.node_id, sender_id, {"ROUTE_RESULTS": self.route_hash})
         
         #ROUTE_RESULTS message contains the results from each nodes route hash operation. This is collected by the Route Volunteer
@@ -50,7 +46,7 @@ class ClientNodeClass():
             self.route_results[sender_id] = message["ROUTE_RESULTS"]
         
         #ORDERED_ROUTE_RESULTS message contains the complete ordered list of each nodes route hash value. It is sent from the route volunteer to every normal node.
-        if "ORDERED_ROUTE_RESULTS" in message.keys() and sender_id in self.node_list and sender_id == self.route_volunteer:
+        if "ORDERED_ROUTE_RESULTS" in message.keys() and sender_id in self.node_list and sender_id == self.network.getRouteVolunteer():
             ordered_dict = message["ORDERED_ROUTE_RESULTS"]
             self.happy_about_route_results = True
 
@@ -97,29 +93,30 @@ class ClientNodeClass():
         if "HASH_SALT_RESULT" in message.keys() and sender_id in self.node_list:
             hash = self.calculateHash(message["HASH_SALT_RESULT"], None, self.algorithm)
             if self.predecessor_route_results is not None:
-                if sender_id == self.predecessor_route_results[0]:
-                    if self.predecessor_route_results[1] != hash:
-                        self.happy_about_route_results = False
+                if sender_id == self.predecessor_route_results[0] and self.predecessor_route_results[1] != hash:
+                    self.happy_about_route_results = False
+
             elif self.successor_route_results is not None:
-                if sender_id == self.successor_route_results[0]:
-                    if self.successor_route_results[1] != hash:
-                        self.happy_about_route_results = False
+                if sender_id == self.successor_route_results[0] and self.successor_route_results[1] != hash:
+                    self.happy_about_route_results = False
 
         #ROUTE_HAPPINESS message contains info on if the nodes are happy with the route created. They have validated their predecessor's and successor's hash values
         if "ROUTE_HAPPINESS" in message.keys() and sender_id in self.node_list:
             if message["ROUTE_HAPPINESS"] != True: 
                 self.nodes_are_happy_with_route = False
                     
-    def beginRouteProcedure(self):
+    def beginRouteProcedure(self):      
         #simulate the node waiting a random time
-        #time.sleep(random.uniform(1, 5))
+        time.sleep(random.uniform(0, 0.1))
 
-        #making 1 be volunteer every reound due to latency in 'transmissions', which causes multiple nodes to volunteer at the same time
-        if self.route_volunteer_available == True and self.node_id == 1:
-            print(f"Node {self.node_id} can volunteer to lead in-house route calculation")
-            self.routeVolunteer()
-            self.route_volunteer_available == False
-            self.route_volunteer = self.node_id
+        volunteer = self.network.getRouteVolunteer()
+        if volunteer == None:
+            with self.network.getRouteVolunteerLock(): #Thread locking used to remove race conditions
+                volunteer = self.network.getRouteVolunteer()
+                if volunteer == None: #re-check if no other node has volunteered yet
+                    print(f"Node {self.node_id} can volunteer to lead in-house route calculation")
+                    self.network.setgetRouteVolunteer(self.node_id)
+                    self.routeVolunteer()
     
     def routeVolunteer(self):
         algorithm = "sha256" #Can add more hashing algorithms to improve security. malicious nodes are less likely to have pre hashed values if diff type of algorithms can be used
@@ -127,7 +124,6 @@ class ClientNodeClass():
         self.route_results = {}
         threads = []
         for node in self.node_list:
-            print(f"Sending algorithm to node {node}")
             t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"ROUTE_PARAMETERS": algorithm}))
             t.start()
             threads.append(t)
@@ -152,7 +148,6 @@ class ClientNodeClass():
         self.nodes_are_happy_with_route = True
         threads = []
         for node in self.node_list:
-            print(f"Sending Sorted Hash values to Node {node}")
             t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"ORDERED_ROUTE_RESULTS": sorted_items}))
             t.start()
             threads.append(t)
@@ -165,6 +160,8 @@ class ClientNodeClass():
             self.network.messageCentralServer(self.node_id, {"VALIDATED_NODE_ROUTE": list(sorted_items.keys())}) #Sends the route to the central server
         else:
             print("Some nodes aren't happy with the route")
+            #In a real world implementation, the whole route generation procedure will start again
+            exit()
     
     #can add different hash algorithms later if needed
     def calculateHash(self, parameter, nonce, algorithm):

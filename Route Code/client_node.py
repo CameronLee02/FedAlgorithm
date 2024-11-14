@@ -32,9 +32,7 @@ class ClientNodeClass():
         
         #ROUTE_PARAMETERS message is set from the route volunteer to all the other nodes and contains the information 
         #needed to generate a hash value for each in-house route operation
-        if "ROUTE_PARAMETERS" in message.keys() and sender_id in self.node_list:
-            self.route_volunteer_available = False
-            self.route_volunteer = sender_id
+        if "ROUTE_PARAMETERS" in message.keys() and sender_id in self.node_list and sender_id == self.network.getRouteVolunteer():
             self.algorithm = message["ROUTE_PARAMETERS"]
             print(f"Node {self.node_id} has received the algorithm {self.algorithm}")
             self.route_salt = int(random.uniform(1000000000, 10000000000)) # generate a random value to use
@@ -48,7 +46,7 @@ class ClientNodeClass():
             self.route_results[sender_id] = message["ROUTE_RESULTS"]
         
         #ORDERED_ROUTE_RESULTS message contains the complete ordered list of each nodes route hash value. It is sent from the route volunteer to every normal node.
-        if "ORDERED_ROUTE_RESULTS" in message.keys() and sender_id in self.node_list and sender_id == self.route_volunteer:
+        if "ORDERED_ROUTE_RESULTS" in message.keys() and sender_id in self.node_list and sender_id == self.network.getRouteVolunteer():
             ordered_dict = message["ORDERED_ROUTE_RESULTS"]
             self.happy_about_route_results = True
 
@@ -110,14 +108,18 @@ class ClientNodeClass():
                     
     def beginRouteProcedure(self):
         #simulate the node waiting a random time
-        #time.sleep(random.uniform(1, 5))
+        time.sleep(random.uniform(0, 0.1))
 
         #making 1 be volunteer every reound due to latency in 'transmissions', which causes multiple nodes to volunteer at the same time
-        if self.route_volunteer_available == True and self.node_id == 1:
-            print(f"Node {self.node_id} can volunteer to lead in-house route calculation")
-            self.routeVolunteer()
-            self.route_volunteer_available == False
-            self.route_volunteer = self.node_id
+        volunteer = self.network.getRouteVolunteer()
+        if volunteer == None:
+            with self.network.getRouteVolunteerLock():
+                volunteer = self.network.getRouteVolunteer()
+                if volunteer == None: #re-check if no other node has volunteered yet
+                    print(f"Node {self.node_id} can volunteer to lead in-house route calculation")
+                    self.network.setgetRouteVolunteer(self.node_id)
+                    self.routeVolunteer()
+                    print(f"Route Volunteer is>------------------ {self.network.getRouteVolunteer()}")
     
     def routeVolunteer(self):
         algorithm = "sha256" #Can add more hashing algorithms to improve security. malicious nodes are less likely to have pre hashed values if diff type of algorithms can be used

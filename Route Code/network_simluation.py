@@ -4,6 +4,8 @@ class NetworkClass:
     def __init__(self):
         self.nodes = {}
         self.server_node = None
+        self.route_volunteer = None
+        self.route_volunteer_lock = threading.Lock()
 
     #Adds a node to the network. ID:0 is reserved for the central server
     def addNode(self, node):
@@ -14,6 +16,15 @@ class NetworkClass:
     
     def getNodes(self):
         return self.nodes
+    
+    def getRouteVolunteer(self):
+        return self.route_volunteer
+    
+    def getRouteVolunteerLock(self):
+        return self.route_volunteer_lock
+    
+    def setgetRouteVolunteer(self, volunteer):
+        self.route_volunteer = volunteer
     
     #this function is used to send 1 message to 1 node
     def messageSingleNode(self, sender_id, receiver_id ,message):
@@ -36,18 +47,3 @@ class NetworkClass:
 
         for t in threads:
             t.join()
-    
-    '''
-    #starts all nodes up
-    def startAllNodes(self):
-        for node in self.nodes.values():
-            node.daemon = True
-            node.start()
-        print("started up all the client nodes")
-        
-        self.server_node.daemon = True
-        self.server_node.start()
-        self.server_node.getNodeList()
-        print("Started up the Server Node")
-        print(f"Nodes: {list(self.nodes.keys())}")
-    '''

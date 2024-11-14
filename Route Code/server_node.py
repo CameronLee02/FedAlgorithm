@@ -21,6 +21,7 @@ class ServerNodeClass():
         if "VALIDATED_NODE_ROUTE" in message.keys() and sender_id in self.node_list:
             route = message["VALIDATED_NODE_ROUTE"]
             print(route)
+            print(f"Route Volunteer is>------------------ {self.network.getRouteVolunteer()}")
     
     #this function is used to simulate the central server sending a list of the participating to all the nodes 
     #Edit this function to allow the server to input dummy nodes into the list
