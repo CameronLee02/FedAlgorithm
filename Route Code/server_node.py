@@ -11,8 +11,8 @@ class ServerNodeClass():
     def stop(self):
         self.running = False
         
-    def getNodeList(self):
-        self.node_list = list(self.network.nodes.keys())
+    def getNodeList(self, node_list):
+        self.node_list = node_list
     
     def receiveMessage(self, sender_id, message):
         if len(message.keys()) != 1:
@@ -21,12 +21,14 @@ class ServerNodeClass():
         if "VALIDATED_NODE_ROUTE" in message.keys() and sender_id in self.node_list:
             route = message["VALIDATED_NODE_ROUTE"]
             print(route)
-            print(f"Route Volunteer is>------------------ {self.network.getRouteVolunteer()}")
+            for key in self.node_list.keys():
+                print(f"Node {key} has the predecessor: {self.node_list[key].predecessor_id} and the successor: {self.node_list[key].successor_id}")
+            self.network.setRouteVolunteer(None)
     
     #this function is used to simulate the central server sending a list of the participating to all the nodes 
     #Edit this function to allow the server to input dummy nodes into the list
     def sendOutListOfNodes(self):
         print("Sending out list of nodes")
         start = time.time()
-        self.network.messageAllNodesExcludeServer(0, {"NODE_LIST" : self.node_list})
+        self.network.messageAllNodesExcludeServer(0, {"NODE_LIST" : list(self.node_list.keys())})
         print(f"Time taken : {time.time()-start}")

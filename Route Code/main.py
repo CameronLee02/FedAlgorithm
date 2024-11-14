@@ -54,7 +54,7 @@ if __name__=="__main__":
         print('Node ID:', node, '... object:', nodes[node])
         
     #network_instance.startAllNodes()
-    central_server.getNodeList()
+    central_server.getNodeList(nodes)
     central_server.sendOutListOfNodes()
 
 

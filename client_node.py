@@ -13,6 +13,7 @@ class ClientNodeClass():
         self.node_id = node_id
         self.network = network
         self.node_list = None
+        self.received_encrypted_weights = None
 
 
     #This function is used to as a way to receive messages from other client nodes or the central server
@@ -50,37 +51,14 @@ class ClientNodeClass():
             ordered_dict = message["ORDERED_ROUTE_RESULTS"]
             self.happy_about_route_results = True
 
-            items = list(ordered_dict.items())
-    
-            # Get index of the node_id in the dictionary
-            index = next((i for i, (key, _) in enumerate(items) if key == self.node_id), None)
-            
-            # Retrieve predecessor and successor's items
-            self.predecessor_route_results = items[index - 1] if index > 0 else None
-            self.successor_route_results = items[index + 1] if index < len(items) - 1 else None
-
             #This section is used to allow the node to check if the predecessor, successor, or route volnteer lied about any of the hash values
             #check their own recorded hash value
             if ordered_dict[self.node_id] != self.calculateHash(self.route_salt, None, self.algorithm):
                 self.happy_about_route_results = False
                 self.network.messageSingleNode(self.node_id, sender_id, {"ROUTE_HAPPINESS": self.happy_about_route_results})
                 return
-            threads = []
-            if self.predecessor_route_results != None:
-                receiver_id = self.predecessor_route_results[0]
-                print(f"Node {self.node_id} Sending hash salt request to node {receiver_id}")
-                t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, receiver_id, {"HASH_SALT_REQUETS": None}))
-                t.start()
-                threads.append(t)
-            if self.successor_route_results != None:
-                receiver_id = self.successor_route_results[0]
-                print(f"Node {self.node_id} Sending hash salt request to node {receiver_id}")
-                t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, receiver_id, {"HASH_SALT_REQUETS": None}))
-                t.start()
-                threads.append(t)
 
-            for t in threads:
-                t.join()
+            self.validateNeighbours(ordered_dict)
             
             self.network.messageSingleNode(self.node_id, sender_id, {"ROUTE_HAPPINESS": self.happy_about_route_results})
             return
@@ -104,6 +82,41 @@ class ClientNodeClass():
         if "ROUTE_HAPPINESS" in message.keys() and sender_id in self.node_list:
             if message["ROUTE_HAPPINESS"] != True: 
                 self.nodes_are_happy_with_route = False
+        
+        if "ENCRYPTED_WEIGHTS" in message.keys() and sender_id in self.node_list and sender_id == self.predecessor_id:
+            self.received_encrypted_weights = message["ENCRYPTED_WEIGHTS"][0]
+            self.local_losses = message["ENCRYPTED_WEIGHTS"][1]
+
+                
+    #This function is used to check the hash values that the node's neighbours provided
+    def validateNeighbours(self, ordered_dict):
+        items = list(ordered_dict.items())
+
+        # Get index of the node_id in the dictionary
+        self.position_in_the_route = next((i for i, (key, _) in enumerate(items) if key == self.node_id), None)
+
+        # Retrieve predecessor and successor's items
+        self.predecessor_route_results = items[self.position_in_the_route - 1] if self.position_in_the_route > 0 else None
+        self.successor_route_results = items[self.position_in_the_route + 1] if self.position_in_the_route < len(items) - 1 else None
+
+        threads = []
+        self.predecessor_id = None #These are used to store the IDs of the predecessor and successor for later use so they know where to send/received encrypted training data
+        self.successor_id = None
+        if self.predecessor_route_results != None:
+            self.predecessor_id = self.predecessor_route_results[0]
+            print(f"Node {self.node_id} Sending hash salt request to node {self.predecessor_id}")
+            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, self.predecessor_id, {"HASH_SALT_REQUETS": None}))
+            t.start()
+            threads.append(t)
+        if self.successor_route_results != None:
+            self.successor_id = self.successor_route_results[0]
+            print(f"Node {self.node_id} Sending hash salt request to node {self.successor_id}")
+            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, self.successor_id, {"HASH_SALT_REQUETS": None}))
+            t.start()
+            threads.append(t)
+
+        for t in threads:
+            t.join()
                     
     def beginRouteProcedure(self):      
         #simulate the node waiting a random time
@@ -115,22 +128,22 @@ class ClientNodeClass():
                 volunteer = self.network.getRouteVolunteer()
                 if volunteer == None: #re-check if no other node has volunteered yet
                     print(f"Node {self.node_id} can volunteer to lead in-house route calculation")
-                    self.network.setgetRouteVolunteer(self.node_id)
+                    self.network.setRouteVolunteer(self.node_id)
                     self.routeVolunteer()
     
     def routeVolunteer(self):
-        algorithm = "sha256" #Can add more hashing algorithms to improve security. malicious nodes are less likely to have pre hashed values if diff type of algorithms can be used
+        self.algorithm = "sha256" #Can add more hashing algorithms to improve security. malicious nodes are less likely to have pre hashed values if diff type of algorithms can be used
         
         self.route_results = {}
         threads = []
         for node in self.node_list:
-            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"ROUTE_PARAMETERS": algorithm}))
+            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"ROUTE_PARAMETERS": self.algorithm}))
             t.start()
             threads.append(t)
         
         #route volunteer must make their own hash as well as this defines the order of the chain
         self.route_salt = int(random.uniform(1000000000, 10000000000)) # generate a random value to use
-        hash = self.calculateHash(self.route_salt, None, algorithm)
+        hash = self.calculateHash(self.route_salt, None, self.algorithm)
         self.route_results[self.node_id] = hash
         
         for t in threads:
@@ -151,6 +164,8 @@ class ClientNodeClass():
             t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"ORDERED_ROUTE_RESULTS": sorted_items}))
             t.start()
             threads.append(t)
+
+        self.validateNeighbours(sorted_items)
         
         for t in threads:
             t.join()
@@ -176,7 +191,7 @@ class ClientNodeClass():
                 sha.update(str(parameter).encode('utf-8'))
                 return sha.hexdigest()
         
-    def client_training(self, client_id, dataset_train, dict_party_user, net_glob, text_widget, context, args, overhead_info, G, visualisation_canvas, visualisation_ax, colours, pos, received_encrypted_weights=None):
+    def client_training(self, client_id, dataset_train, dict_party_user, net_glob, text_widget, context, args, overhead_info, G, visualisation_canvas, visualisation_ax, colours, pos):
         self.network.updateText(f'Starting training on client {client_id}', text_widget)
 
         local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_party_user[client_id])
@@ -208,14 +223,35 @@ class ClientNodeClass():
 
         # Encryption of local weights
         encrypted_weights = self.network.encryptWeights(local_weights, context, text_widget)
+        
+        #This while loop is used to make the node wait for it's predecessor
+        while self.received_encrypted_weights == None and self.predecessor_id != None:
+            time.sleep(0.1)
 
         # Aggregation with previously received encrypted weights (if applicable)
-        if received_encrypted_weights is not None:
-            encrypted_weights = self.network.aggregate_encrypted_weights(encrypted_weights, received_encrypted_weights, 2, text_widget)
-            colours[clients_index] = "green"
-            self.network.updateDisplayNetwork(G, visualisation_canvas, visualisation_ax, colours, pos)
+        if self.predecessor_id is not None:
+            current_encrypted_weights = self.network.aggregateEncryptedWeights(
+                self.received_encrypted_weights,
+                encrypted_weights,
+                self.position_in_the_route+1,
+                text_widget
+            )
+        else:
+            current_encrypted_weights = encrypted_weights
+            self.local_losses = []
+        
+        self.local_losses.append(loss)
+        
+        if self.successor_id is not None:
+            self.network.messageSingleNode(self.node_id, self.successor_id, {"ENCRYPTED_WEIGHTS": [current_encrypted_weights, self.local_losses.copy()]})
+        else:
+            self.network.messageCentralServer(self.node_id, {"ENCRYPTED_WEIGHTS": [current_encrypted_weights, self.local_losses.copy()]})
+        
+        self.local_losses = [] #Resets the nodes recorded losses and encrypted weights for next epoch 
+        self.received_encrypted_weights = None
 
-        return encrypted_weights, local_weights, loss
+        colours[clients_index] = "green"
+        self.network.updateDisplayNetwork(G, visualisation_canvas, visualisation_ax, colours, pos)
     
     def checkStatus(self):
         print("still alive")

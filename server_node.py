@@ -12,6 +12,8 @@ class ServerNodeClass():
         self.network = network
         self.node_list = None
         self.route = None
+        self.received_encrypted_weights = None
+        self.local_loss = None
     
     #This function collects all the nodes that are in the network
     def getNodeList(self, node_list):
@@ -24,9 +26,14 @@ class ServerNodeClass():
         
         if "VALIDATED_NODE_ROUTE" in message.keys() and sender_id in self.node_list.keys():
             self.route = message["VALIDATED_NODE_ROUTE"]
+        
+        if "ENCRYPTED_WEIGHTS" in message.keys() and sender_id in self.node_list.keys() and sender_id == self.route[-1]:
+            self.received_encrypted_weights = message["ENCRYPTED_WEIGHTS"][0]
+            self.local_loss = message["ENCRYPTED_WEIGHTS"][1]
     
     #This function is used to simulate the central server sending a list of the participating to all the nodes 
     def sendOutListOfNodes(self):
+        print("Sent out the route message")
         self.network.messageAllNodesExcludeServer(0, {"NODE_LIST" : list(self.node_list.keys())})
     
     # CKKS Context Setup
@@ -61,25 +68,6 @@ class ServerNodeClass():
         self.network.updateText(f"Decryption completed in {decryption_time:.4f} seconds.", text_widget)
         overhead_info["decryption_times"].append(decryption_time)
         return decrypted_weights
-
-    def threaded_client_training(self, node_object, node_id, dataset_train, dict_party_user, net_glob, context, text_widget, received_encrypted_weights, results, G, visualisation_canvas, visualisation_ax, colours, pos, args, overhead_info):
-        encrypted_weights, local_weights, loss = node_object.client_training(
-            node_id,
-            dataset_train,
-            dict_party_user,
-            net_glob,
-            text_widget,
-            context,
-            args,
-            overhead_info,
-            G, #this parameter and below are used for route visualisation except received_encrypted_weights
-            visualisation_canvas,
-            visualisation_ax,
-            colours,
-            pos,
-            received_encrypted_weights
-        )
-        results[node_id] = (encrypted_weights, local_weights, loss)
     
     def trainingProcess(self, net_glob, arg, dataset_train, dict_party_user, text_widget, visualisation_canvas, visualisation_ax, overhead_info, ax1, ax2, canvas):
         context = self.create_ckks_context()
@@ -99,18 +87,30 @@ class ServerNodeClass():
 
             colours, pos, G = self.network.displayNetwork(self.route, visualisation_canvas, visualisation_ax)
             
-            local_losses = []
             original_shapes = {name: weight.shape for name, weight in net_glob.state_dict().items()}
 
-            received_encrypted_weights = None
-            results = {}
+            self.received_encrypted_weights = None 
+            self.local_loss = []
             threads = []
 
-            for idx, node_id in enumerate(self.route):
+            for node_id in self.route:
                 node_object = self.node_list[node_id]
                 thread = threading.Thread(
-                    target=self.threaded_client_training,
-                    args=(node_object, node_id, dataset_train, dict_party_user, net_glob, context, text_widget, received_encrypted_weights, results, G, visualisation_canvas, visualisation_ax, colours, pos, arg, overhead_info)
+                    target=node_object.client_training,
+                    args=(node_id,
+                        dataset_train,
+                        dict_party_user,
+                        net_glob,
+                        text_widget,
+                        context,
+                        arg,
+                        overhead_info,
+                        G, #this parameter and below are used for route visualisation
+                        visualisation_canvas,
+                        visualisation_ax,
+                        colours,
+                        pos
+                    )
                 )
                 threads.append(thread)
                 thread.start()
@@ -118,28 +118,8 @@ class ServerNodeClass():
             for thread in threads:
                 thread.join()
 
-            client_count = 0
-
-            for idx, user in enumerate(self.route):
-                encrypted_weights, local_weights, loss = results[user]
-                client_count += 1
-
-                if received_encrypted_weights is not None:
-                    received_encrypted_weights = self.network.aggregateEncryptedWeights(
-                        received_encrypted_weights,
-                        encrypted_weights,
-                        client_count,
-                        text_widget
-                    )
-                else:
-                    received_encrypted_weights = encrypted_weights
-                colours[idx] = "green"
-                self.network.updateDisplayNetwork(G, visualisation_canvas, visualisation_ax, colours, pos)
-
-                local_losses.append(loss)
-
             self.network.updateText('Final client sending aggregated encrypted weights to server.', text_widget)
-            decrypted_weights = self.decryptWeights(received_encrypted_weights, context, original_shapes, text_widget, client_count, overhead_info)
+            decrypted_weights = self.decryptWeights(self.received_encrypted_weights, context, original_shapes, text_widget, len(self.route), overhead_info)
 
             if self.network.checkForNan(decrypted_weights, "Global Model Weights", text_widget):
                 raise ValueError("NaN detected in global model weights before updating.")
@@ -151,7 +131,7 @@ class ServerNodeClass():
 
             net_glob.eval()
             acc_train, _ = test_fun(net_glob, dataset_train, arg)
-            epoch_losses.append(np.mean(local_losses))
+            epoch_losses.append(np.mean(self.local_loss))
             epoch_accuracies.append(acc_train)
 
             self.network.updateText(f'Epoch {iter + 1} completed. Train Acc: {acc_train:.2f}', text_widget)
@@ -160,6 +140,8 @@ class ServerNodeClass():
             epoch_end_time = time.time()
             epoch_duration = epoch_end_time - epoch_start_time
             overhead_info["epoch_times"].append(epoch_duration)
+
+            self.network.setRouteVolunteer(None)
             visualisation_ax.clear() #used to clear/reset the network visualisation window
             visualisation_canvas.draw()
 

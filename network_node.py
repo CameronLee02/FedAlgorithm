@@ -305,5 +305,5 @@ class NetworkSimulationClass():
     def getRouteVolunteerLock(self):
         return self.route_volunteer_lock
     
-    def setgetRouteVolunteer(self, volunteer):
+    def setRouteVolunteer(self, volunteer):
         self.route_volunteer = volunteer

@@ -50,37 +50,14 @@ class ClientNodeClass():
             ordered_dict = message["ORDERED_ROUTE_RESULTS"]
             self.happy_about_route_results = True
 
-            items = list(ordered_dict.items())
-    
-            # Get index of the node_id in the dictionary
-            index = next((i for i, (key, _) in enumerate(items) if key == self.node_id), None)
-            
-            # Retrieve predecessor and successor's items
-            self.predecessor_route_results = items[index - 1] if index > 0 else None
-            self.successor_route_results = items[index + 1] if index < len(items) - 1 else None
-
             #This section is used to allow the node to check if the predecessor, successor, or route volnteer lied about any of the hash values
             #check their own recorded hash value
             if ordered_dict[self.node_id] != self.calculateHash(self.route_salt, None, self.algorithm):
                 self.happy_about_route_results = False
                 self.network.messageSingleNode(self.node_id, sender_id, {"ROUTE_HAPPINESS": self.happy_about_route_results})
                 return
-            threads = []
-            if self.predecessor_route_results != None:
-                receiver_id = self.predecessor_route_results[0]
-                print(f"Node {self.node_id} Sending hash salt request to node {receiver_id}")
-                t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, receiver_id, {"HASH_SALT_REQUETS": None}))
-                t.start()
-                threads.append(t)
-            if self.successor_route_results != None:
-                receiver_id = self.successor_route_results[0]
-                print(f"Node {self.node_id} Sending hash salt request to node {receiver_id}")
-                t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, receiver_id, {"HASH_SALT_REQUETS": None}))
-                t.start()
-                threads.append(t)
 
-            for t in threads:
-                t.join()
+            self.validateNeighbours(ordered_dict)
             
             self.network.messageSingleNode(self.node_id, sender_id, {"ROUTE_HAPPINESS": self.happy_about_route_results})
             return
@@ -105,6 +82,35 @@ class ClientNodeClass():
         if "ROUTE_HAPPINESS" in message.keys() and sender_id in self.node_list:
             if message["ROUTE_HAPPINESS"] != True: 
                 self.nodes_are_happy_with_route = False
+    
+    def validateNeighbours(self, ordered_dict):
+        items = list(ordered_dict.items())
+
+        # Get index of the node_id in the dictionary
+        self.position_in_the_route = next((i for i, (key, _) in enumerate(items) if key == self.node_id), None)
+
+        # Retrieve predecessor and successor's items
+        self.predecessor_route_results = items[self.position_in_the_route - 1] if self.position_in_the_route > 0 else None
+        self.successor_route_results = items[self.position_in_the_route + 1] if self.position_in_the_route < len(items) - 1 else None
+
+        threads = []
+        self.predecessor_id = None #These are used to store the IDs of the predecessor and successor for later use so they know where to send/received encrypted training data
+        self.successor_id = None
+        if self.predecessor_route_results != None:
+            self.predecessor_id = self.predecessor_route_results[0]
+            print(f"Node {self.node_id} Sending hash salt request to node {self.predecessor_id}")
+            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, self.predecessor_id, {"HASH_SALT_REQUETS": None}))
+            t.start()
+            threads.append(t)
+        if self.successor_route_results != None:
+            self.successor_id = self.successor_route_results[0]
+            print(f"Node {self.node_id} Sending hash salt request to node {self.successor_id}")
+            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, self.successor_id, {"HASH_SALT_REQUETS": None}))
+            t.start()
+            threads.append(t)
+
+        for t in threads:
+            t.join()
                     
     def beginRouteProcedure(self):
         #simulate the node waiting a random time
@@ -122,19 +128,19 @@ class ClientNodeClass():
                     print(f"Route Volunteer is>------------------ {self.network.getRouteVolunteer()}")
     
     def routeVolunteer(self):
-        algorithm = "sha256" #Can add more hashing algorithms to improve security. malicious nodes are less likely to have pre hashed values if diff type of algorithms can be used
+        self.algorithm = "sha256" #Can add more hashing algorithms to improve security. malicious nodes are less likely to have pre hashed values if diff type of algorithms can be used
         
         self.route_results = {}
         threads = []
         for node in self.node_list:
             print(f"Sending algorithm to node {node}")
-            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"ROUTE_PARAMETERS": algorithm}))
+            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"ROUTE_PARAMETERS": self.algorithm}))
             t.start()
             threads.append(t)
         
         #route volunteer must make their own hash as well as this defines the order of the chain
         self.route_salt = int(random.uniform(1000000000, 10000000000)) # generate a random value to use
-        hash = self.calculateHash(self.route_salt, None, algorithm)
+        hash = self.calculateHash(self.route_salt, None, self.algorithm)
         self.route_results[self.node_id] = hash
         
         for t in threads:
@@ -156,6 +162,8 @@ class ClientNodeClass():
             t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"ORDERED_ROUTE_RESULTS": sorted_items}))
             t.start()
             threads.append(t)
+        
+        self.validateNeighbours(sorted_items)
         
         for t in threads:
             t.join()
