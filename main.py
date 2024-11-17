@@ -18,12 +18,12 @@ if __name__=="__main__":
     network_simulation_instance = NetworkSimulationClass(args)
 
     #Adds central server to the network
-    central_server = ServerNodeClass(0, network_simulation_instance)
+    central_server = ServerNodeClass(0, network_simulation_instance, args)
     network_simulation_instance.addNode(central_server)
 
     #Add all the nodes to the network
     for num in range(args.num_users):
-        new_node = ClientNodeClass(num+1, network_simulation_instance)
+        new_node = ClientNodeClass(num+1, network_simulation_instance, args)
         network_simulation_instance.addNode(new_node)
 
     nodes = network_simulation_instance.getNodes()

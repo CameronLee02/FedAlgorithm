@@ -1,11 +1,18 @@
 # Custom Federated Learning - Series Based Learning
 Forked Repository from SIA project of FL to custom algorithm on Federated Learning.
 
-# Three main file:
+# Three main file for Alian's code:
 
 main_fed_sequential.py: No Homomorphic Encryption, series based custom algorithm (MNIST SUPPORT ONLY) <br> 
 main_fed_sequential_threaded.py: No Homomorphic Encryption, series based custom algorithm (THREADING ENABLED) (MNIST SUPPORT ONLY) <br>
 main_fed_sequential_threaded_ckks_updated.py: CKKS Partial Addition Homomorphic Encryption, series based custom algorithm (THREADING ENABLED) <br>
+
+# Four main files for Cameron's code (extension from Alian's):
+
+main.py: Contains code necessary to run simulation
+network_node.py: Conatins the NetworkSimulationClass which acts as the network in this simulation and transmits messages between the Clients and the Central Server
+client_node.py: Contains the ClientNodeClass which acts as a Client in the simulation
+server_node.py: Contains the ServerNodeClass which acts as the Central Server in the simulation
 
 ## For Speed purposes:
 
@@ -31,14 +38,15 @@ Python TenSEAL library required for CKKS file, current setup uses Python Version
 
 # Implementation
 
-You can try different `--alpha` (data distribution), `--num_users`(number of parties), `--local_ep` (number of local epochs) to see how the attack performance changes. For `MNIST` dataset, we set `--model=cnn`.
+You can try different `--alpha` (data distribution), `--num_users`(number of parties), `--local_ep` (number of local epochs), `--partition_sizes` (minimum size of the partitions) to see how the attack performance changes. For `MNIST` dataset, we set `--model=cnn`.<br>
+`--partition_sizes` is not a valid argument parameter in Alian's implementation, and must be removed if you wish to run his legacy code
 
 ## For MNIST
 ```python
-python main_fed_sequential_threaded_ckks_updated.py --dataset=MNIST --model=cnn --alpha=1 --num_users=6 --local_ep=5
+python main.py --dataset=MNIST --model=cnn --alpha=1 --num_users=5 --local_ep=5 --partition_size=3
 ```
 
 ## For CIFAR-10
 ```python
-python main_fed_sequential_threaded_ckks_updated.py --dataset=CIFAR10 --model=cnn --alpha=1 --num_users=6 --local_ep=5
+python main.py --dataset=CIFAR10 --model=cnn --alpha=1 --num_users=5 --local_ep=5 --partition_size=3
 ```

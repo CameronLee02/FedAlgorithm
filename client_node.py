@@ -3,17 +3,20 @@ import time
 import random
 import hashlib 
 import copy
+import numpy as np
 
 from models.Update import LocalUpdate
 
 #Client node class that acts as the local clients participating in FL
 class ClientNodeClass():
-    def __init__(self, node_id, network):
+    def __init__(self, node_id, network, args):
         super().__init__()
         self.node_id = node_id
         self.network = network
+        self.args = args
         self.node_list = None
         self.received_encrypted_weights = None
+        self.route = None
 
 
     #This function is used to as a way to receive messages from other client nodes or the central server
@@ -48,7 +51,14 @@ class ClientNodeClass():
         
         #ORDERED_ROUTE_RESULTS message contains the complete ordered list of each nodes route hash value. It is sent from the route volunteer to every normal node.
         if "ORDERED_ROUTE_RESULTS" in message.keys() and sender_id in self.node_list and sender_id == self.network.getRouteVolunteer():
-            ordered_dict = message["ORDERED_ROUTE_RESULTS"]
+            ordered_dict = message["ORDERED_ROUTE_RESULTS"]["HASH_RESULTS"]
+            partitions = message["ORDERED_ROUTE_RESULTS"]["PARTITIONS"]
+            
+            for partition in partitions:
+                if self.node_id in partition:
+                    self.route = partition
+                    continue
+            
             self.happy_about_route_results = True
 
             #This section is used to allow the node to check if the predecessor, successor, or route volnteer lied about any of the hash values
@@ -90,26 +100,23 @@ class ClientNodeClass():
                 
     #This function is used to check the hash values that the node's neighbours provided
     def validateNeighbours(self, ordered_dict):
-        items = list(ordered_dict.items())
-
         # Get index of the node_id in the dictionary
-        self.position_in_the_route = next((i for i, (key, _) in enumerate(items) if key == self.node_id), None)
+        self.position_in_the_route = self.route.index(self.node_id)
 
-        # Retrieve predecessor and successor's items
-        self.predecessor_route_results = items[self.position_in_the_route - 1] if self.position_in_the_route > 0 else None
-        self.successor_route_results = items[self.position_in_the_route + 1] if self.position_in_the_route < len(items) - 1 else None
+        self.predecessor_id = self.route[self.position_in_the_route - 1] if self.position_in_the_route > 0 else None
+        self.successor_id = self.route[self.position_in_the_route + 1] if self.position_in_the_route < len(self.route) - 1 else None
 
         threads = []
-        self.predecessor_id = None #These are used to store the IDs of the predecessor and successor for later use so they know where to send/received encrypted training data
-        self.successor_id = None
-        if self.predecessor_route_results != None:
-            self.predecessor_id = self.predecessor_route_results[0]
+        self.predecessor_route_results = None
+        self.successor_route_results = None
+        if self.predecessor_id != None:
+            self.predecessor_route_results = ordered_dict[self.predecessor_id]
             print(f"Node {self.node_id} Sending hash salt request to node {self.predecessor_id}")
             t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, self.predecessor_id, {"HASH_SALT_REQUETS": None}))
             t.start()
             threads.append(t)
-        if self.successor_route_results != None:
-            self.successor_id = self.successor_route_results[0]
+        if self.successor_id != None:
+            self.successor_route_results = ordered_dict[self.successor_id] 
             print(f"Node {self.node_id} Sending hash salt request to node {self.successor_id}")
             t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, self.successor_id, {"HASH_SALT_REQUETS": None}))
             t.start()
@@ -122,11 +129,9 @@ class ClientNodeClass():
         #simulate the node waiting a random time
         time.sleep(random.uniform(0, 0.1))
 
-        volunteer = self.network.getRouteVolunteer()
-        if volunteer == None:
-            with self.network.getRouteVolunteerLock(): #Thread locking used to remove race conditions
-                volunteer = self.network.getRouteVolunteer()
-                if volunteer == None: #re-check if no other node has volunteered yet
+        if self.network.getRouteVolunteer() == None:
+            with self.network.getRouteVolunteerLock():
+                if self.network.getRouteVolunteer() == None: #re-check if no other node has volunteered yet
                     print(f"Node {self.node_id} can volunteer to lead in-house route calculation")
                     self.network.setRouteVolunteer(self.node_id)
                     self.routeVolunteer()
@@ -154,29 +159,59 @@ class ClientNodeClass():
             print(f"Node {key} provided the hash value: {value}")
 
         print("--------------------------Ordering all hashing values in ascending order--------------------------")
-        sorted_items = dict(sorted(self.route_results.items(), key=lambda item: item[1]))
-        for key, value in sorted_items.items():
+        sorted_hash_results_dict = dict(sorted(self.route_results.items(), key=lambda item: item[1]))
+        sorted_hash_results_list = list(sorted_hash_results_dict.keys())
+        for key, value in sorted_hash_results_dict.items():
             print(f"Node {key} provided the hash value: {value}")
+
+        num_of_nodes_in_each_partition = self.args.partition_size
+        partitions = self.generatePartitions(sorted_hash_results_list, num_of_nodes_in_each_partition)
 
         self.nodes_are_happy_with_route = True
         threads = []
         for node in self.node_list:
-            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"ORDERED_ROUTE_RESULTS": sorted_items}))
+            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"ORDERED_ROUTE_RESULTS": {"HASH_RESULTS" : sorted_hash_results_dict, "PARTITIONS": partitions }}))
             t.start()
             threads.append(t)
 
-        self.validateNeighbours(sorted_items)
+        for partition in partitions:
+            if self.node_id in partition:
+                self.route = partition
+                continue
+            
+        self.validateNeighbours(sorted_hash_results_dict)
         
         for t in threads:
             t.join()
         
         if self.nodes_are_happy_with_route:
             print("All Nodes are happy with the route")
-            self.network.messageCentralServer(self.node_id, {"VALIDATED_NODE_ROUTE": list(sorted_items.keys())}) #Sends the route to the central server
+            self.network.messageCentralServer(self.node_id, {"VALIDATED_NODE_ROUTE": partitions}) #Sends the route to the central server
         else:
             print("Some nodes aren't happy with the route")
             #In a real world implementation, the whole route generation procedure will start again
             exit()
+
+    def generatePartitions(self, sorted_hash_results_list, num_of_nodes_in_each_partitions):
+        num_of_nodes = len(sorted_hash_results_list)
+        num_of_partitions = num_of_nodes // num_of_nodes_in_each_partitions
+        remainder = num_of_nodes % num_of_nodes_in_each_partitions
+        partition_sizes = np.full(num_of_partitions, num_of_nodes_in_each_partitions)
+
+        count = 0
+        while remainder != 0:
+            if count >= len(partition_sizes):
+                count = 0
+            partition_sizes[count] += 1
+            remainder-= 1
+
+        partitions = []
+        count = 0
+        for i in range(num_of_partitions):
+            partitions.append(sorted_hash_results_list[count:count + int(partition_sizes[i])])
+            count += int(partition_sizes[i])
+
+        return partitions
     
     #can add different hash algorithms later if needed
     def calculateHash(self, parameter, nonce, algorithm):
@@ -191,10 +226,10 @@ class ClientNodeClass():
                 sha.update(str(parameter).encode('utf-8'))
                 return sha.hexdigest()
         
-    def client_training(self, client_id, dataset_train, dict_party_user, net_glob, text_widget, context, args, overhead_info, G, visualisation_canvas, visualisation_ax, colours, pos):
+    def client_training(self, client_id, dataset_train, dict_party_user, net_glob, text_widget, context, overhead_info, G, visualisation_canvas, visualisation_ax, colours, pos):
         self.network.updateText(f'Starting training on client {client_id}', text_widget)
 
-        local = LocalUpdate(args=args, dataset=dataset_train, idxs=dict_party_user[client_id])
+        local = LocalUpdate(args=self.args, dataset=dataset_train, idxs=dict_party_user[client_id])
 
         # Measure model distribution (downloading the model to the client)
         start_model_distribution = time.time()
@@ -205,7 +240,7 @@ class ClientNodeClass():
         self.network.updateText(f"Model distributed to client {client_id} in {model_distribution_time:.4f} seconds.", text_widget)
 
         # Training the local model
-        local_weights, loss = local.train(net=copy.deepcopy(net_glob).to(args.device))
+        local_weights, loss = local.train(net=copy.deepcopy(net_glob).to(self.args.device))
 
         if self.network.checkForNan(local_weights, f"Client {client_id} local weights after training", text_widget):
             raise ValueError(f"NaN detected in Client {client_id} local weights after training.")
@@ -233,7 +268,6 @@ class ClientNodeClass():
             current_encrypted_weights = self.network.aggregateEncryptedWeights(
                 self.received_encrypted_weights,
                 encrypted_weights,
-                self.position_in_the_route+1,
                 text_widget
             )
         else:
@@ -252,6 +286,3 @@ class ClientNodeClass():
 
         colours[clients_index] = "green"
         self.network.updateDisplayNetwork(G, visualisation_canvas, visualisation_ax, colours, pos)
-    
-    def checkStatus(self):
-        print("still alive")

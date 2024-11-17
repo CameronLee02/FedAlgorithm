@@ -29,7 +29,6 @@ class NetworkClass:
     #this function is used to send 1 message to 1 node
     def messageSingleNode(self, sender_id, receiver_id ,message):
         if sender_id in self.nodes.keys() and receiver_id in self.nodes.keys():
-            print(f"sending message to {receiver_id}")
             self.nodes[receiver_id].receiveMessage(sender_id, message)
     
     #This function is used to send a message to just the central server node
@@ -47,3 +46,4 @@ class NetworkClass:
 
         for t in threads:
             t.join()
+

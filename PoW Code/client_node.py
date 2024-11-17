@@ -88,9 +88,9 @@ class ClientNodeClass():
         self.times = {}
         for key, value in self.pow_parameters.items():
             print(f"Recorded parameters {key}: {value}")
+            self.pow_parameters[key].update({"TIME_START": time.time()})
             t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, key, {"PoW_PARAMETERS": value.copy()}))
             t.start()
-            self.pow_parameters[key].update({"TIME_START": time.time()})
             threads.append(t)
         
         #PoW volunteer must conduct their own proof of work as well so they can be assigned a partitioned route later on
@@ -124,7 +124,7 @@ class ClientNodeClass():
         threads = []
         for node in self.node_list:
             print(f"Sending PoW results to Node {node}")
-            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"ORDERED_ROUTE_RESULTS": self.pow_parameters}))
+            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"PoW_RESULTS": self.pow_parameters}))
             t.start()
             threads.append(t)
         
@@ -141,7 +141,7 @@ class ClientNodeClass():
             self.network.messageAllNodesExcludeServer(self.node_id, {"VALIDATED_POW": self.nodes_are_happy_with_pow})
         else:
             print("Some nodes aren't happy with the route")
-
+    
     #PoW is completed by getting the node to concat the provided number with a number of their own into string format.
     #This is then hashed and if it doesn't have the required number of leading 0's (difficulty). 
     #The node must redo this process with a different number of their own

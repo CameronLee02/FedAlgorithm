@@ -95,7 +95,7 @@ class NetworkSimulationClass():
         self.overhead_info["encryption_times"].append(encryption_time)
         return encrypted_weights
 
-    def aggregateEncryptedWeights(self, encrypted_weights1, encrypted_weights2, client_count, text_widget):
+    def aggregateEncryptedWeights(self, encrypted_weights1, encrypted_weights2, text_widget):
         start_time = time.time()
         self.updateText("Aggregating encrypted weights using homomorphic addition...", text_widget)
         aggregated_weights = {}
@@ -110,19 +110,6 @@ class NetworkSimulationClass():
         self.updateText(f"Encrypted weights aggregation completed in {aggregation_time:.4f} seconds.", text_widget)
         self.overhead_info["aggregation_times"].append(aggregation_time)
         return aggregated_weights
-
-    def displayNetwork(self, clients, visualisation_canvas, visualisation_ax):
-        edge = []
-        colours = ["red"] * len(clients)
-        for i in range(1,len(clients)):
-            edge.append((clients[i-1], clients[i]))
-        G = nx.Graph()
-        G.add_nodes_from(clients)
-        G.add_edges_from(edge)
-        pos ={node: (i, 0) for i, node in enumerate(G.nodes())}
-        nx.draw(G, pos, with_labels=True, node_size=800, node_color=colours, font_size=10, font_weight="bold", edge_color="gray", ax=visualisation_ax)
-        visualisation_canvas.draw()
-        return colours, pos, G
 
     def updateDisplayNetwork(self, G, visualisation_canvas, visualisation_ax, colours, pos):
         nx.draw(G, pos, with_labels=True, node_size=800, node_color=colours, font_size=10, font_weight="bold", edge_color="gray", ax=visualisation_ax)
@@ -149,38 +136,38 @@ class NetworkSimulationClass():
 
         canvas.draw()
 
-    def initialiseLearningFixtures(self, args, text_widget, ax1, ax2, fig, canvas, visualisation_canvas, visualisation_ax):
-        dataset_train, dataset_test, dict_party_user, _ = get_dataset(args)
+    def initialiseLearningFixtures(self, text_widget, ax1, ax2, fig, canvas, visualisation_canvas, visualisation_ax):
+        dataset_train, dataset_test, dict_party_user, _ = get_dataset(self.args)
         self.overhead_info["dataset_info"] = {
-            "dataset": args.dataset,
+            "dataset": self.args.dataset,
             "train_size": len(dataset_train),
             "test_size": len(dataset_test)
         }
 
-        if args.model == 'cnn':
-            if args.dataset == 'MNIST':
-                net_glob = Mnistcnn(args=args).to(args.device)
-            elif args.dataset == 'CIFAR10':
-                net_glob = Cifar10cnn(args=args).to(args.device)
+        if self.args.model == 'cnn':
+            if self.args.dataset == 'MNIST':
+                net_glob = Mnistcnn(args=self.args).to(self.args.device)
+            elif self.args.dataset == 'CIFAR10':
+                net_glob = Cifar10cnn(args=self.args).to(self.args.device)
             else:
                 self.updateText('Error: unrecognized dataset for CNN model', text_widget)
                 return
-        elif args.model == 'mlp':
+        elif self.args.model == 'mlp':
             len_in = 1
             for dim in dataset_train[0][0].shape:
                 len_in *= dim
-            net_glob = MLP(dim_in=len_in, dim_hidden=200, dim_out=args.num_classes).to(args.device)
+            net_glob = MLP(dim_in=len_in, dim_hidden=200, dim_out=self.args.num_classes).to(self.args.device)
         else:
             self.updateText('Error: unrecognized model', text_widget)
             return
 
         self.updateText('Federated Learning Simulation started. Initializing model architecture...\n', text_widget)
-        self.updateText('Model architecture loaded and initialized. Starting training process on dataset: ' + args.dataset + '\n', text_widget)
+        self.updateText('Model architecture loaded and initialized. Starting training process on dataset: ' + self.args.dataset + '\n', text_widget)
         self.updatePlots([], [], ax1, ax2, canvas)
 
-        acc_train = self.server_node.trainingProcess(net_glob, args, dataset_train, dict_party_user, text_widget, visualisation_canvas, visualisation_ax, self.overhead_info, ax1, ax2, canvas)
+        acc_train = self.server_node.trainingProcess(net_glob, dataset_train, dict_party_user, text_widget, visualisation_canvas, visualisation_ax, self.overhead_info, ax1, ax2, canvas)
 
-        exp_details(args)
+        exp_details(self.args)
         self.updateText("Training complete. Final Accuracy: {:.2f}".format(acc_train), text_widget)
         self.showResultsWindow()
     
@@ -280,7 +267,7 @@ class NetworkSimulationClass():
 
         def startLearningProcess():
             start_time = time.time()
-            self.initialiseLearningFixtures(self.args, text_area, ax1, ax2, fig, canvas, visualisation_canvas, visualisation_ax)
+            self.initialiseLearningFixtures(text_area, ax1, ax2, fig, canvas, visualisation_canvas, visualisation_ax)
             total_time = time.time() - start_time
             text_area.insert(tk.END, f"Total time for completion: {total_time / 60:.2f} minutes.")
 

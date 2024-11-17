@@ -3,17 +3,20 @@ import time
 import tenseal as ts
 import numpy as np
 import torch
+import networkx as nx
 from models.test import test_fun
 
 class ServerNodeClass():
-    def __init__(self, node_id, network):
+    def __init__(self, node_id, network, args):
         super().__init__()
         self.node_id = node_id
         self.network = network
-        self.node_list = None
-        self.route = None
-        self.received_encrypted_weights = None
-        self.local_loss = None
+        self.args = args
+        self.node_list = []
+        self.route = []
+        self.predecessors = []
+        self.received_encrypted_weights_list = []
+        self.local_loss = []
     
     #This function collects all the nodes that are in the network
     def getNodeList(self, node_list):
@@ -26,10 +29,13 @@ class ServerNodeClass():
         
         if "VALIDATED_NODE_ROUTE" in message.keys() and sender_id in self.node_list.keys():
             self.route = message["VALIDATED_NODE_ROUTE"]
+            self.predecessors = [] #holds the IDs of all the central server's predecessors. So it knows who to look out for
+            for route in self.route:
+                self.predecessors.append(route[-1])
         
-        if "ENCRYPTED_WEIGHTS" in message.keys() and sender_id in self.node_list.keys() and sender_id == self.route[-1]:
-            self.received_encrypted_weights = message["ENCRYPTED_WEIGHTS"][0]
-            self.local_loss = message["ENCRYPTED_WEIGHTS"][1]
+        if "ENCRYPTED_WEIGHTS" in message.keys() and sender_id in self.node_list.keys() and sender_id in self.predecessors:
+            self.received_encrypted_weights_list.append(message["ENCRYPTED_WEIGHTS"][0])
+            self.local_loss.append(message["ENCRYPTED_WEIGHTS"][1])
     
     #This function is used to simulate the central server sending a list of the participating to all the nodes 
     def sendOutListOfNodes(self):
@@ -69,7 +75,32 @@ class ServerNodeClass():
         overhead_info["decryption_times"].append(decryption_time)
         return decrypted_weights
     
-    def trainingProcess(self, net_glob, arg, dataset_train, dict_party_user, text_widget, visualisation_canvas, visualisation_ax, overhead_info, ax1, ax2, canvas):
+    def displayNetwork(self, visualisation_canvas, visualisation_ax):
+
+        nodes = []
+        edges = []
+        for partition in self.route:
+            nodes += partition
+            for node in range(1,len(partition)):
+                edges.append((partition[node-1], partition[node]))
+        
+        colours = ["red"] * len(nodes)
+        G = nx.Graph()
+        G.add_nodes_from(nodes)
+        G.add_edges_from(edges)
+
+
+        # Draw the graph on the specified axes
+        pos = {}
+        for i in range(len(self.route)):
+            for j in range(len(self.route[i])):
+                pos[self.route[i][j]] = (j, -i)
+        
+        nx.draw(G, pos, with_labels=True, node_size=800, node_color=colours, font_size=10, font_weight="bold", edge_color="gray", ax=visualisation_ax)
+        visualisation_canvas.draw()
+        return colours, pos, G
+    
+    def trainingProcess(self, net_glob, dataset_train, dict_party_user, text_widget, visualisation_canvas, visualisation_ax, overhead_info, ax1, ax2, canvas):
         context = self.create_ckks_context()
 
         net_glob.train()
@@ -79,21 +110,26 @@ class ServerNodeClass():
 
         start_total_time = time.time()
         
-        for iter in range(arg.epochs):
+        for iter in range(self.args.epochs):
             epoch_start_time = time.time()
             self.network.updateText(f'+++ Epoch {iter + 1} starts +++', text_widget)
 
             self.sendOutListOfNodes()
 
-            colours, pos, G = self.network.displayNetwork(self.route, visualisation_canvas, visualisation_ax)
+            colours, pos, G = self.displayNetwork(visualisation_canvas, visualisation_ax)
             
             original_shapes = {name: weight.shape for name, weight in net_glob.state_dict().items()}
 
-            self.received_encrypted_weights = None 
+            self.received_encrypted_weights_list = []
             self.local_loss = []
             threads = []
 
-            for node_id in self.route:
+            #Collects all nodes currently participating in the training. some nodes may be in the network (self.node_list) but aren't participating
+            nodes = []
+            for route in self.route:
+                nodes += route
+
+            for node_id in nodes:
                 node_object = self.node_list[node_id]
                 thread = threading.Thread(
                     target=node_object.client_training,
@@ -103,7 +139,6 @@ class ServerNodeClass():
                         net_glob,
                         text_widget,
                         context,
-                        arg,
                         overhead_info,
                         G, #this parameter and below are used for route visualisation
                         visualisation_canvas,
@@ -118,8 +153,16 @@ class ServerNodeClass():
             for thread in threads:
                 thread.join()
 
+            received_encrypted_weights = self.received_encrypted_weights_list[0]
+            for i in range(1, len(self.received_encrypted_weights_list)):
+                received_encrypted_weights = self.network.aggregateEncryptedWeights(
+                received_encrypted_weights,
+                self.received_encrypted_weights_list[i],
+                text_widget
+            )
+
             self.network.updateText('Final client sending aggregated encrypted weights to server.', text_widget)
-            decrypted_weights = self.decryptWeights(self.received_encrypted_weights, context, original_shapes, text_widget, len(self.route), overhead_info)
+            decrypted_weights = self.decryptWeights(received_encrypted_weights, context, original_shapes, text_widget, len(nodes), overhead_info)
 
             if self.network.checkForNan(decrypted_weights, "Global Model Weights", text_widget):
                 raise ValueError("NaN detected in global model weights before updating.")
@@ -130,7 +173,7 @@ class ServerNodeClass():
             self.network.updateText('Server has updated the global model with final aggregated weights.', text_widget)
 
             net_glob.eval()
-            acc_train, _ = test_fun(net_glob, dataset_train, arg)
+            acc_train, _ = test_fun(net_glob, dataset_train, self.args)
             epoch_losses.append(np.mean(self.local_loss))
             epoch_accuracies.append(acc_train)
 
