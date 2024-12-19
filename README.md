@@ -1,7 +1,7 @@
 # Custom Federated Learning - Series Based Learning
 Forked Repository from SIA project of FL to custom algorithm on Federated Learning.
 
-# Three main file for Alian's code:
+# Three main file for Alian's code (Now in 'Legacy Code' folder):
 
 main_fed_sequential.py: No Homomorphic Encryption, series based custom algorithm (MNIST SUPPORT ONLY) <br> 
 main_fed_sequential_threaded.py: No Homomorphic Encryption, series based custom algorithm (THREADING ENABLED) (MNIST SUPPORT ONLY) <br>
