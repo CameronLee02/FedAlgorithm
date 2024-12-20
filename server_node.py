@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import networkx as nx
 from models.test import test_fun
+import statistics
 
 class ServerNodeClass():
     def __init__(self, node_id, network, args):
@@ -35,7 +36,13 @@ class ServerNodeClass():
         
         if "ENCRYPTED_WEIGHTS" in message.keys() and sender_id in self.node_list.keys() and sender_id in self.predecessors:
             self.received_encrypted_weights_list.append(message["ENCRYPTED_WEIGHTS"][0])
-            self.local_loss.append(message["ENCRYPTED_WEIGHTS"][1])
+            self.local_loss += message["ENCRYPTED_WEIGHTS"][1]
+        
+        if "FINAL_NOISE_VALUE" in message.keys() and sender_id in self.node_list:
+            self.noise_values_count += 1
+            for index, route in enumerate(self.route):
+                if sender_id in route:
+                    self.noise_values[index].append(message["FINAL_NOISE_VALUE"])
     
     #This function is used to simulate the central server sending a list of the participating to all the nodes 
     def sendOutListOfNodes(self):
@@ -53,7 +60,7 @@ class ServerNodeClass():
         context.generate_galois_keys()
         return context
     
-    def decryptWeights(self, encrypted_weights, context, original_shapes, text_widget, client_count, overhead_info):
+    def decryptWeights(self, encrypted_weights, context, original_shapes, text_widget, client_count, overhead_info, noise):
         start_time = time.time()
         self.network.updateText("Decrypting aggregated weights using CKKS decryption...", text_widget)
         decrypted_weights = {}
@@ -62,7 +69,7 @@ class ServerNodeClass():
             for enc_weight in enc_weight_chunks:
                 decrypted_flat.extend(enc_weight.decrypt())
 
-            decrypted_array = (np.array(decrypted_flat, dtype=np.float32) / client_count).reshape(original_shapes[name])
+            decrypted_array = ((np.array(decrypted_flat, dtype=np.float32) / client_count) - noise / client_count).reshape(original_shapes[name]) ### REMOVE NOISE HERE
             decrypted_weights[name] = torch.tensor(decrypted_array, dtype=torch.float32)
 
             self.network.logWeightStats({name: decrypted_weights[name]}, "Decrypted Weights", text_widget)
@@ -99,6 +106,26 @@ class ServerNodeClass():
         nx.draw(G, pos, with_labels=True, node_size=800, node_color=colours, font_size=10, font_weight="bold", edge_color="gray", ax=visualisation_ax)
         visualisation_canvas.draw()
         return colours, pos, G
+
+    def calculateNoise(self):
+        self.noise_values = []
+        self.noise_values_count = 0 #keeps track of how many nodes have sent back their calculated noise
+        max_noise_count = 0 #contains the max amount of nodes that will send back their calculated noise
+
+        for route in self.route:
+            max_noise_count += len(route)
+            self.noise_values.append([])
+        self.network.messageAllNodesExcludeServer(0, {"CALC_NOISE" : None})
+
+        #waits until it has received all the node's noise paritions sums
+        while self.noise_values_count != max_noise_count :
+            time.sleep(0.1)
+        
+        print(f"Central server received: {self.noise_values}")
+        self.noise_added = 0
+        for noise in self.noise_values:
+            self.noise_added += statistics.mode(noise)
+        print(f"Central server received: {self.noise_added }")
     
     def trainingProcess(self, net_glob, dataset_train, dict_party_user, text_widget, visualisation_canvas, visualisation_ax, overhead_info, ax1, ax2, canvas):
         context = self.create_ckks_context()
@@ -160,9 +187,11 @@ class ServerNodeClass():
                 self.received_encrypted_weights_list[i],
                 text_widget
             )
+            
+            self.calculateNoise()
 
             self.network.updateText('Final client sending aggregated encrypted weights to server.', text_widget)
-            decrypted_weights = self.decryptWeights(received_encrypted_weights, context, original_shapes, text_widget, len(nodes), overhead_info)
+            decrypted_weights = self.decryptWeights(received_encrypted_weights, context, original_shapes, text_widget, len(nodes), overhead_info, self.noise_added)
 
             if self.network.checkForNan(decrypted_weights, "Global Model Weights", text_widget):
                 raise ValueError("NaN detected in global model weights before updating.")
@@ -174,6 +203,7 @@ class ServerNodeClass():
 
             net_glob.eval()
             acc_train, _ = test_fun(net_glob, dataset_train, self.args)
+            print(self.local_loss)
             epoch_losses.append(np.mean(self.local_loss))
             epoch_accuracies.append(acc_train)
 

@@ -75,13 +75,13 @@ class DatasetSplit(Dataset):
     def __init__(self, dataset, idxs):
         self.dataset = dataset
         self.idxs = list(idxs)
-        print(f'DatasetSplit initialized with {len(self.idxs)} indices.')
+        #print(f'DatasetSplit initialized with {len(self.idxs)} indices.')
 
     def __len__(self):
         return len(self.idxs)
 
     def __getitem__(self, item):
-        print(f'Fetching item {item} from indices...')
+        #print(f'Fetching item {item} from indices...')
         image, label = self.dataset[self.idxs[item]]
-        print(f'Fetched image shape: {image.shape}, label: {label}')
+        #print(f'Fetched image shape: {image.shape}, label: {label}')
         return image, label

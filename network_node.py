@@ -76,7 +76,7 @@ class NetworkSimulationClass():
             weight_np = weight.cpu().numpy()
             self.updateText(f"{description} - {name}: mean={weight_np.mean():.4f}, max={weight_np.max():.4f}, min={weight_np.min():.4f}", text_widget)
     
-    def encryptWeights(self, weights_dict, context, text_widget, chunk_size=1000):
+    def encryptWeights(self, weights_dict, context, text_widget, noise, chunk_size=1000):
         start_time = time.time()
         self.updateText("Encrypting weights using CKKS encryption...", text_widget)
         encrypted_weights = {}
@@ -85,8 +85,10 @@ class NetworkSimulationClass():
             if np.isnan(weight_np).any():
                 self.updateText(f"NaN detected in {name} before encryption", text_widget)
                 continue
+
+            noisey_weight_np = weight_np + noise ### ADD NOISE HERE
             
-            weight_chunks = np.array_split(weight_np.flatten(), max(1, len(weight_np.flatten()) // chunk_size))
+            weight_chunks = np.array_split(noisey_weight_np.flatten(), max(1, len(noisey_weight_np.flatten()) // chunk_size))
             encrypted_chunks = [ts.ckks_vector(context, chunk) for chunk in weight_chunks]
             encrypted_weights[name] = encrypted_chunks
         

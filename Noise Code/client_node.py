@@ -1,8 +1,6 @@
 import threading
 import time
 import random
-import hashlib 
-import numpy as np
 
 
 #Client node class that acts as the local clients participating in FL
@@ -14,6 +12,7 @@ class ClientNodeClass():
         self.node_list = None
         self.parition_numbers = []
         self.parition_sums = []
+        self.noise_values = []
 
     def receiveMessage(self, sender_id, message):
         if len(message.keys()) != 1:
@@ -40,16 +39,16 @@ class ClientNodeClass():
             self.parition_sums.append(message["NOISE_PARTITION_SUM"])
                     
     def noiseProcedure(self):
-        self.noise = random.randrange(100, 1000)
+        self.noise = round(random.uniform(100, 1000),4)
         num_of_participates = len(self.node_list)#grabs the number of participates excluding themselves (NEED TO ADJUST SO ONLY COUNTS THE NUMBER IN ITS ROUTE)
 
         # I find this method of creating random partitions of a number is better at creating a more consistent/even spread. As others would have a 1 or 2 
         # very large valued partitions causing the rest to be very small (around the single digits). In a real world implementation, nodes can chose which every method they want
         list_of_partition_indexes = [] #holds the indexes that the noise number will be divided on. This creates numerous sub-lists where the size of these will be used to partition the noise number
         for i in range(num_of_participates):
-            num = random.randrange(0, self.noise)
+            num = round(random.uniform(0, self.noise),4)
             while num in list_of_partition_indexes:
-                num = random.randrange(0, self.noise)
+                num = round(random.uniform(0, self.noise),4)
             list_of_partition_indexes.append(num)
         list_of_partition_indexes.sort()
         partition_values = []
@@ -57,8 +56,8 @@ class ClientNodeClass():
             if i == 0:
                 partition_values.append(list_of_partition_indexes[i])
             else:
-                partition_values.append(list_of_partition_indexes[i] - list_of_partition_indexes[i-1])
-        partition_values.append(self.noise - list_of_partition_indexes[-1])
+                partition_values.append(round(list_of_partition_indexes[i] - list_of_partition_indexes[i-1],4))
+        partition_values.append(round(self.noise - list_of_partition_indexes[-1],4))
         print(f"Node {self.node_id} chose the noise: {self.noise} and split it into the values: {partition_values}")
 
         # sends all the noise number paritions (except 1) to all their neighbours

@@ -17,6 +17,9 @@ class ClientNodeClass():
         self.node_list = None
         self.received_encrypted_weights = None
         self.route = None
+        self.parition_numbers = []
+        self.parition_sums = []
+        self.noise_values = []
 
 
     #This function is used to as a way to receive messages from other client nodes or the central server
@@ -96,6 +99,79 @@ class ClientNodeClass():
         if "ENCRYPTED_WEIGHTS" in message.keys() and sender_id in self.node_list and sender_id == self.predecessor_id:
             self.received_encrypted_weights = message["ENCRYPTED_WEIGHTS"][0]
             self.local_losses = message["ENCRYPTED_WEIGHTS"][1]
+        
+        #CALC_NOISE message is a notification from the central server to tell the nodes to star the noise calculation process
+        if "CALC_NOISE" in message.keys() and sender_id == 0:
+            self.noiseProcedure()
+
+        #NOISE_PARTITION message contains a node's share/parition of it's noise that they added to their results to protect it
+        if "NOISE_PARTITION" in message.keys() and sender_id in self.node_list and sender_id in self.route:
+            self.parition_numbers.append(message["NOISE_PARTITION"])
+
+        #NOISE_PARTITION_SUM message contains a node's sum of the shares it received from other nodes
+        if "NOISE_PARTITION_SUM" in message.keys() and sender_id in self.node_list and sender_id in self.route:
+            self.parition_sums.append(message["NOISE_PARTITION_SUM"])
+    
+    #this function is used to split the noise added into partitions and send them to the other nodes to calculate the total noise added
+    def noiseProcedure(self):
+        num_of_participates = len(self.route)-1
+
+        # I find this method of creating random partitions of a number is better at creating a more consistent/even spread. As others would have a 1 or 2 
+        # very large valued partitions causing the rest to be very small (around the single digits). In a real world implementation, nodes can chose which every method they want
+        list_of_partition_indexes = [] #holds the indexes that the noise number will be divided on. This creates numerous sub-lists where the size of these will be used to partition the noise number
+        for i in range(num_of_participates):
+            num = round(random.uniform(0, self.noise),4)
+            while num in list_of_partition_indexes:
+                num = round(random.uniform(0, self.noise),4)
+            list_of_partition_indexes.append(num)
+        list_of_partition_indexes.sort()
+        partition_values = []
+        for i in range(len(list_of_partition_indexes)):
+            if i == 0:
+                partition_values.append(list_of_partition_indexes[i])
+            else:
+                partition_values.append(round(list_of_partition_indexes[i] - list_of_partition_indexes[i-1],4))
+        partition_values.append(round(self.noise - list_of_partition_indexes[-1],4))
+        print(f"Node {self.node_id} chose the noise: {self.noise} and split it into the values: {partition_values}")
+
+        # sends all the noise number paritions (except 1) to all the other nodes in their route
+        threads = []
+        for index, node in enumerate(self.route):
+            if self.node_id != node:
+                t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"NOISE_PARTITION": partition_values[index]}))
+                t.start()
+                threads.append(t)
+            else:
+                self.parition_numbers.append(partition_values[index])
+        
+        #waits until it has received all the other nodes noise paritions
+        while len(self.parition_numbers) != num_of_participates+1:
+            time.sleep(0.1)
+        
+        parition_sum = sum(self.parition_numbers)
+        self.parition_sums.append(parition_sum)
+
+        # sends the sum of the paritions they have received to all the other nodes in their route
+        threads = []
+        for node in self.route:
+            if self.node_id != node:
+                t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"NOISE_PARTITION_SUM": parition_sum}))
+                t.start()
+                threads.append(t)
+        
+        #waits until it has received all the other nodes noise parition sums
+        while len(self.parition_sums) != num_of_participates+1:
+            time.sleep(0.1)
+        
+        final_noise_value = sum(self.parition_sums)
+
+        #send final calculated noise to central server
+        self.network.messageCentralServer(self.node_id, {"FINAL_NOISE_VALUE": final_noise_value})
+
+        #resets all object parameters used in this procedure
+        self.parition_numbers = []
+        self.parition_sums = []
+        self.noise_values = []
 
                 
     #This function is used to check the hash values that the node's neighbours provided
@@ -253,11 +329,15 @@ class ClientNodeClass():
         self.network.updateText(f'Client {client_id} has completed training. Loss: {loss:.4f}', text_widget)
         self.network.logWeightStats(local_weights, f"Client {client_id} local weights before encryption", text_widget)
 
+
         if self.network.checkForNan(local_weights, f"Client {client_id} local weights before encryption", text_widget):
             raise ValueError(f"NaN detected in Client {client_id} local weights before encryption.")
+        
+        #generates noise that will be added to the encrypted weights
+        self.noise = round(random.uniform(10, 100),4)
 
         # Encryption of local weights
-        encrypted_weights = self.network.encryptWeights(local_weights, context, text_widget)
+        encrypted_weights = self.network.encryptWeights(local_weights, context, text_widget, self.noise)
         
         #This while loop is used to make the node wait for it's predecessor
         while self.received_encrypted_weights == None and self.predecessor_id != None:
@@ -286,3 +366,4 @@ class ClientNodeClass():
 
         colours[clients_index] = "green"
         self.network.updateDisplayNetwork(G, visualisation_canvas, visualisation_ax, colours, pos)
+
