@@ -37,6 +37,17 @@ class ClientNodeClass():
                 return
             #removes itself from list so it doesn't send messages to itself
             self.node_list.remove(self.node_id)
+            self.beginPoWProcedure()
+        
+        #START_ROUTE_GEN message is a signal given to the clients to tell them to all start generating a route simultaneously 
+        if "START_ROUTE_GEN" in message.keys() and sender_id == 0:
+            if message["START_ROUTE_GEN"] != None:
+                self.node_list = message["START_ROUTE_GEN"].copy()
+
+                if self.node_id not in self.node_list: 
+                    return
+
+                self.node_list.remove(self.node_id)
             self.beginRouteProcedure()
         
         #ROUTE_PARAMETERS message is set from the route volunteer to all the other nodes and contains the information 
@@ -46,7 +57,7 @@ class ClientNodeClass():
             self.route_salt = int(random.uniform(1000000000, 10000000000)) # generate a random value to use
             self.route_hash = self.calculateHash(self.route_salt, None, self.algorithm)
 
-            self.network.messageSingleNode(self.node_id, sender_id, {"ROUTE_RESULTS": self.route_hash})
+            self.network.messageSingleNode(self.node_id, sender_id, {"ROUTE_RESULTS": self.route_hash}, "route")
         
         #ROUTE_RESULTS message contains the results from each nodes route hash operation. This is collected by the Route Volunteer
         if "ROUTE_RESULTS" in message.keys() and sender_id in self.node_list:
@@ -68,17 +79,22 @@ class ClientNodeClass():
             #check their own recorded hash value
             if ordered_dict[self.node_id] != self.calculateHash(self.route_salt, None, self.algorithm):
                 self.happy_about_route_results = False
-                self.network.messageSingleNode(self.node_id, sender_id, {"ROUTE_HAPPINESS": self.happy_about_route_results})
+                self.network.messageSingleNode(self.node_id, sender_id, {"ROUTE_HAPPINESS": self.happy_about_route_results}, "route")
                 return
 
             self.validateNeighbours(ordered_dict)
             
-            self.network.messageSingleNode(self.node_id, sender_id, {"ROUTE_HAPPINESS": self.happy_about_route_results})
+            self.network.messageSingleNode(self.node_id, sender_id, {"ROUTE_HAPPINESS": self.happy_about_route_results}, "route")
             return
         
+        #ROUTE_HAPPINESS message contains info on if the nodes are happy with the route created. They have validated their predecessor's and successor's hash values
+        if "ROUTE_HAPPINESS" in message.keys() and sender_id in self.node_list:
+            if message["ROUTE_HAPPINESS"] != True: 
+                self.nodes_are_happy_with_route = False
+
         #HASH_SALT_REQUETS message contains a request of the salt this node added to their route hash value so the sender can validate the hash
         if "HASH_SALT_REQUETS" in message.keys() and sender_id in self.node_list:
-            self.network.messageSingleNode(self.node_id, sender_id, {"HASH_SALT_RESULT": self.route_salt})
+            self.network.messageSingleNode(self.node_id, sender_id, {"HASH_SALT_RESULT": self.route_salt}, "route")
         
         #HASH_SALT_RESULT contains the salt used by either the predecessor or the successor. This section determines if they match or not
         if "HASH_SALT_RESULT" in message.keys() and sender_id in self.node_list:
@@ -90,11 +106,6 @@ class ClientNodeClass():
             elif self.successor_route_results is not None:
                 if sender_id == self.successor_route_results[0] and self.successor_route_results[1] != hash:
                     self.happy_about_route_results = False
-
-        #ROUTE_HAPPINESS message contains info on if the nodes are happy with the route created. They have validated their predecessor's and successor's hash values
-        if "ROUTE_HAPPINESS" in message.keys() and sender_id in self.node_list:
-            if message["ROUTE_HAPPINESS"] != True: 
-                self.nodes_are_happy_with_route = False
         
         if "ENCRYPTED_WEIGHTS" in message.keys() and sender_id in self.node_list and sender_id == self.predecessor_id:
             self.received_encrypted_weights = message["ENCRYPTED_WEIGHTS"][0]
@@ -111,6 +122,41 @@ class ClientNodeClass():
         #NOISE_PARTITION_SUM message contains a node's sum of the shares it received from other nodes
         if "NOISE_PARTITION_SUM" in message.keys() and sender_id in self.node_list and sender_id in self.route:
             self.parition_sums.append(message["NOISE_PARTITION_SUM"])
+        
+        #PoW_PARAMETERS message contains the parameters for the PoW (the arbitrary number, num of leading 0's, hashing algorithm)
+        #this section also performs the PoW 
+        if "PoW_PARAMETERS" in message.keys() and sender_id in self.node_list:
+            parameters = message["PoW_PARAMETERS"]
+
+            hash, salt = self.proofOfWork(parameters)
+
+            print(f"{self.node_id} finshed their proof of work: {hash}")
+            self.network.messageSingleNode(self.node_id, sender_id, {"PoW_SINGLE_RESULT": {"SALT": salt}}, "pow")
+
+        #PoW_SINGLE_RESULT message contains the results (salt used) from the PoW of a single node
+        if "PoW_SINGLE_RESULT" in message.keys() and sender_id in self.node_list and sender_id in self.pow_parameters.keys():
+            self.pow_parameters[sender_id].update({"TIME_END": time.time()})
+            self.pow_parameters[sender_id].update(message["PoW_SINGLE_RESULT"])
+
+        #PoW_RESULTS message contains the results of all the participating nodes (Time, hash, provided number, etc)
+        if "PoW_RESULTS" in message.keys() and sender_id in self.node_list and sender_id == self.network.getPoWVolunteer():
+            results = message["PoW_RESULTS"]
+            happy_about_pow_results = True
+            ######
+            #Here the node can do their own checking of the results and if they find anyone susupicious (eg. client spoofing as a normal node)
+            ######
+            if results == None:
+                happy_about_pow_results = False
+            self.network.messageSingleNode(self.node_id, sender_id, {"PoW_HAPPINESS": happy_about_pow_results}, "pow")
+        
+        #PoW_HAPPINESS message contains info on if a node is happy with the pow results. They can do their own checking/validation
+        if "PoW_HAPPINESS" in message.keys() and sender_id in self.node_list and sender_id in self.pow_parameters.keys():
+            if message["PoW_HAPPINESS"] == False:
+                self.nodes_are_happy_with_pow = False
+        
+        #PoW_HAPPINESS message contains info on if all nodes is happy with the pow results. So they can collectively go onto the next stage
+        if "VALIDATED_POW" in message.keys() and sender_id in self.node_list:
+            pass
     
     #this function is used to split the noise added into partitions and send them to the other nodes to calculate the total noise added
     def noiseProcedure(self):
@@ -138,15 +184,18 @@ class ClientNodeClass():
         threads = []
         for index, node in enumerate(self.route):
             if self.node_id != node:
-                t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"NOISE_PARTITION": partition_values[index]}))
+                t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"NOISE_PARTITION": partition_values[index]}, "noise"))
                 t.start()
                 threads.append(t)
             else:
                 self.parition_numbers.append(partition_values[index])
         
+        for t in threads:
+            t.join()
+        
         #waits until it has received all the other nodes noise paritions
         while len(self.parition_numbers) != num_of_participates+1:
-            time.sleep(0.1)
+            time.sleep(0.01)
         
         parition_sum = sum(self.parition_numbers)
         self.parition_sums.append(parition_sum)
@@ -155,18 +204,21 @@ class ClientNodeClass():
         threads = []
         for node in self.route:
             if self.node_id != node:
-                t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"NOISE_PARTITION_SUM": parition_sum}))
+                t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"NOISE_PARTITION_SUM": parition_sum}, "noise"))
                 t.start()
                 threads.append(t)
         
+        for t in threads:
+            t.join()
+        
         #waits until it has received all the other nodes noise parition sums
         while len(self.parition_sums) != num_of_participates+1:
-            time.sleep(0.1)
+            time.sleep(0.01)
         
         final_noise_value = sum(self.parition_sums)
 
         #send final calculated noise to central server
-        self.network.messageCentralServer(self.node_id, {"FINAL_NOISE_VALUE": final_noise_value})
+        self.network.messageCentralServer(self.node_id, {"FINAL_NOISE_VALUE": final_noise_value}, "noise")
 
         #resets all object parameters used in this procedure
         self.parition_numbers = []
@@ -188,13 +240,13 @@ class ClientNodeClass():
         if self.predecessor_id != None:
             self.predecessor_route_results = ordered_dict[self.predecessor_id]
             print(f"Node {self.node_id} Sending hash salt request to node {self.predecessor_id}")
-            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, self.predecessor_id, {"HASH_SALT_REQUETS": None}))
+            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, self.predecessor_id, {"HASH_SALT_REQUETS": None}, "route"))
             t.start()
             threads.append(t)
         if self.successor_id != None:
             self.successor_route_results = ordered_dict[self.successor_id] 
             print(f"Node {self.node_id} Sending hash salt request to node {self.successor_id}")
-            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, self.successor_id, {"HASH_SALT_REQUETS": None}))
+            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, self.successor_id, {"HASH_SALT_REQUETS": None}, "route"))
             t.start()
             threads.append(t)
 
@@ -218,7 +270,7 @@ class ClientNodeClass():
         self.route_results = {}
         threads = []
         for node in self.node_list:
-            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"ROUTE_PARAMETERS": self.algorithm}))
+            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"ROUTE_PARAMETERS": self.algorithm}, "route"))
             t.start()
             threads.append(t)
         
@@ -246,7 +298,7 @@ class ClientNodeClass():
         self.nodes_are_happy_with_route = True
         threads = []
         for node in self.node_list:
-            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"ORDERED_ROUTE_RESULTS": {"HASH_RESULTS" : sorted_hash_results_dict, "PARTITIONS": partitions }}))
+            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"ORDERED_ROUTE_RESULTS": {"HASH_RESULTS" : sorted_hash_results_dict, "PARTITIONS": partitions }}, "route"))
             t.start()
             threads.append(t)
 
@@ -262,7 +314,7 @@ class ClientNodeClass():
         
         if self.nodes_are_happy_with_route:
             print("All Nodes are happy with the route")
-            self.network.messageCentralServer(self.node_id, {"VALIDATED_NODE_ROUTE": partitions}) #Sends the route to the central server
+            self.network.messageCentralServer(self.node_id, {"VALIDATED_NODE_ROUTE": partitions}, "route") #Sends the route to the central server
         else:
             print("Some nodes aren't happy with the route")
             #In a real world implementation, the whole route generation procedure will start again
@@ -288,6 +340,95 @@ class ClientNodeClass():
             count += int(partition_sizes[i])
 
         return partitions
+
+    def beginPoWProcedure(self):
+        #simulate the node waiting a random time
+        time.sleep(random.uniform(0, 0.1))
+
+        if self.network.getPoWVolunteer() == None:
+            with self.network.getPoWVolunteerLock():
+                if self.network.getPoWVolunteer() == None: #re-check if no other node has volunteered yet
+                    print(f"Node {self.node_id} can volunteer to lead PoW calculation")
+                    self.network.setPoWVolunteer(self.node_id)
+                    self.PoWVolunteer()
+    
+    def PoWVolunteer(self):
+        self.pow_parameters = {}
+        for node in self.node_list:
+            #paramters of PoW is [Random 10 digit number, number of leading 0's, hashing algorithm]
+            self.pow_parameters[node] = {"NODE": node ,"ARBITRARY_NUMBER": int(random.uniform(1000000000, 10000000000)), "DIFFICULTY": 4, "ALGORITHM" :'sha256'}
+
+        #sends out the parameters to the nodes via the network
+        threads = []
+        self.times = {}
+        for key, value in self.pow_parameters.items():
+            print(f"Recorded parameters {key}: {value}")
+            self.pow_parameters[key].update({"TIME_START": time.time()})
+            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, key, {"PoW_PARAMETERS": value.copy()}, "pow"))
+            t.start()
+            threads.append(t)
+        
+        #PoW volunteer must conduct their own proof of work as well so they can be assigned a partitioned route later on
+        self.pow_parameters[self.node_id] = {
+            "ARBITRARY_NUMBER": int(random.uniform(1000000000, 10000000000)), 
+            "DIFFICULTY": 4, 
+            "ALGORITHM" :'sha256', 
+            "TIME_START": time.time(), 
+            "TIME_END": None}
+
+        hash, salt = self.proofOfWork(self.pow_parameters[self.node_id])
+
+        print(f"{self.node_id} finshed their proof of work: {hash}")
+
+        self.pow_parameters[self.node_id]["TIME_END"] = time.time()
+        self.pow_parameters[self.node_id].update({"SALT": salt})
+
+        for t in threads:
+            t.join()
+
+        #This part is used to check the PoW of the nodes to make sure they are correct and that they solved it in time
+        for key, value in self.pow_parameters.items():
+            hash = self.calculateHash(value["ARBITRARY_NUMBER"], value["SALT"], value["ALGORITHM"])
+            time_taken = self.pow_parameters[key]["TIME_END"] - self.pow_parameters[key]["TIME_START"]
+            if hash[0:value["DIFFICULTY"]] != "0" * value["DIFFICULTY"]:
+                print(f"Node {key} provided incorrect with the time of: {time_taken}")
+            else:
+                print(f"Node {key}'s PoW is correct with the time of: {time_taken}")
+        
+        self.nodes_are_happy_with_pow = True
+        threads = []
+        for node in self.node_list:
+            print(f"Sending PoW results to Node {node}")
+            t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"PoW_RESULTS": self.pow_parameters}, "pow"))
+            t.start()
+            threads.append(t)
+        
+        ######
+        #Here the PoW volunteer can do their own checking of the results and if they find anyone susupicious (eg. client spoofing as a normal node)
+        ######        
+        
+        for t in threads:
+            t.join()
+        
+        if self.nodes_are_happy_with_pow:
+            print("All Nodes are happy with the PoW")
+            #Sends the overall happiness of the PoW to every node. So they can collectively go onto the next stage
+            self.network.messageCentralServer(self.node_id, {"VALIDATED_POW": self.nodes_are_happy_with_pow}, "pow")
+        else:
+            print("Some nodes aren't happy with the route")
+            exit
+    
+    #PoW is completed by getting the node to concat the provided number with a number of their own into string format.
+    #This is then hashed and if it doesn't have the required number of leading 0's (difficulty). 
+    #The node must redo this process with a different number of their own
+    def proofOfWork(self, parameters):
+        salt = 0
+        hash = self.calculateHash(parameters["ARBITRARY_NUMBER"], salt, parameters["ALGORITHM"])
+        while hash[0:parameters["DIFFICULTY"]] != "0" * parameters["DIFFICULTY"]: 
+            salt += 1
+            hash = self.calculateHash(parameters["ARBITRARY_NUMBER"], salt, parameters["ALGORITHM"])
+
+        return hash, salt
     
     #can add different hash algorithms later if needed
     def calculateHash(self, parameter, nonce, algorithm):
@@ -312,6 +453,7 @@ class ClientNodeClass():
         net_glob.load_state_dict(copy.deepcopy(net_glob.state_dict()))
         model_distribution_time = time.time() - start_model_distribution
         overhead_info["model_distribution_times"].append(model_distribution_time)
+        overhead_info["training_num_transmissions"][overhead_info["epoch_num"]] += 1 #count model distribution as apart of training section
 
         self.network.updateText(f"Model distributed to client {client_id} in {model_distribution_time:.4f} seconds.", text_widget)
 
@@ -357,9 +499,9 @@ class ClientNodeClass():
         self.local_losses.append(loss)
         
         if self.successor_id is not None:
-            self.network.messageSingleNode(self.node_id, self.successor_id, {"ENCRYPTED_WEIGHTS": [current_encrypted_weights, self.local_losses.copy()]})
+            self.network.messageSingleNode(self.node_id, self.successor_id, {"ENCRYPTED_WEIGHTS": [current_encrypted_weights, self.local_losses.copy()]}, "training")
         else:
-            self.network.messageCentralServer(self.node_id, {"ENCRYPTED_WEIGHTS": [current_encrypted_weights, self.local_losses.copy()]})
+            self.network.messageCentralServer(self.node_id, {"ENCRYPTED_WEIGHTS": [current_encrypted_weights, self.local_losses.copy()]}, "training")
         
         self.local_losses = [] #Resets the nodes recorded losses and encrypted weights for next epoch 
         self.received_encrypted_weights = None

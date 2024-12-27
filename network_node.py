@@ -21,9 +21,22 @@ class NetworkSimulationClass():
         self.server_node = None
         self.route_volunteer = None
         self.route_volunteer_lock = threading.Lock()
+        self.pow_volunteer = None
+        self.pow_volunteer_lock = threading.Lock()
         self.overhead_info = {
+            "epoch_num": 0,
             "epoch_times": [],
+            "acc_score": [],
+            "loss_score": [],
             "total_time": 0,
+            "pow_time": [],
+            "route_generation_time": [],
+            "noise_calc_time": [],
+            "training_time": [],
+            "pow_num_transmissions": [],
+            "route_generation_num_transmissions": [],
+            "noise_calc_num_transmissions": [],
+            "training_num_transmissions": [],
             "model_distribution_times": [],
             "encryption_times": [],
             "aggregation_times": [],
@@ -40,25 +53,40 @@ class NetworkSimulationClass():
         }
     
     #this function is used to send 1 message to 1 node
-    def messageSingleNode(self, sender_id, receiver_id ,message):
+    def messageSingleNode(self, sender_id, receiver_id ,message, reason):
         if sender_id in self.nodes.keys() and receiver_id in self.nodes.keys():
+            self.checkReason(reason)
             self.nodes[receiver_id].receiveMessage(sender_id, message)
     
     #This function is used to send a message to just the central server node
-    def messageCentralServer(self, sender_id, message):
+    def messageCentralServer(self, sender_id, message, reason):
+        self.checkReason(reason)
         self.server_node.receiveMessage(sender_id, message)
     
     #this function is used to send a message to all the node, except the central server node.
-    def messageAllNodesExcludeServer(self, sender_id, message):
+    def messageAllNodesExcludeServer(self, sender_id, message, reason):
         threads = []
         for key, value in self.nodes.items():
             if key != sender_id:
+                self.checkReason(reason)
                 t = threading.Thread(target=value.receiveMessage, args=(sender_id, message))
                 t.start()
                 threads.append(t)
 
         for t in threads:
             t.join()
+    
+    #checks the reason for the transmissions and increments the count the keeps track of the number of transmissions for that reason
+    #purely just for collecting data. not necessary for implementation
+    def checkReason(self, reason):
+        if reason == "pow":
+            self.overhead_info["pow_num_transmissions"][self.overhead_info["epoch_num"]] += 1
+        elif reason == "training":
+            self.overhead_info["training_num_transmissions"][self.overhead_info["epoch_num"]] += 1
+        elif reason == "route":
+            self.overhead_info["route_generation_num_transmissions"][self.overhead_info["epoch_num"]] += 1
+        elif reason == "noise":
+            self.overhead_info["noise_calc_num_transmissions"][self.overhead_info["epoch_num"]] += 1
 
     def updateText(self, message, text_widget):
         text_widget.insert(tk.END, message + '\n')
@@ -296,3 +324,12 @@ class NetworkSimulationClass():
     
     def setRouteVolunteer(self, volunteer):
         self.route_volunteer = volunteer
+    
+    def getPoWVolunteer(self):
+        return self.pow_volunteer
+    
+    def getPoWVolunteerLock(self):
+        return self.pow_volunteer_lock
+    
+    def setPoWVolunteer(self, volunteer):
+        self.pow_volunteer = volunteer

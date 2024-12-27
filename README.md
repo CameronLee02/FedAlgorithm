@@ -28,7 +28,7 @@ from utils.dataset_limit import get_dataset, exp_details
 ```
 will allow you to create and limit the train size and test size to a more suitable value to see how the simulation runs. (SPECIFIC TO MNIST ONLY)
 
-For example, using dataset_limit with a limit of 1000 sample will have its simulation completed in around 3 minutes, whilst the regular line will utilise the entire dataset and will take approximately 45 minutes to complete. (Values taken from MacBook Pro (M1 Pro, 16 GB Unified Memory)
+For example, using dataset_limit with a limit of 1000 sample will have its simulation completed in around 3 minutes, whilst the regular line will utilise the entire dataset and will take approximately 45 minutes to complete. (Values taken from MacBook Pro (M1 Pro, 16 GB Unified Memory))
 
 
 # IMPORTANT
@@ -38,15 +38,15 @@ Python TenSEAL library required for CKKS file, current setup uses Python Version
 
 # Implementation
 
-You can try different `--alpha` (data distribution), `--num_users`(number of parties), `--local_ep` (number of local epochs), `--partition_sizes` (minimum size of the partitions) to see how the attack performance changes. For `MNIST` dataset, we set `--model=cnn`.<br>
-`--partition_sizes` is not a valid argument parameter in Alian's implementation, and must be removed if you wish to run his legacy code
+You can try different `--alpha` (data distribution), `--num_users`(number of parties), `--local_ep` (number of local epochs), `--partition_sizes` (minimum size of the partitions) to see how the attack performance changes, `--pow` (allow the simulation to conduct the Proof of Work or not). For `MNIST` dataset, we set `--model=cnn`.<br>
+`--partition_sizes` and `--pow` are not valid argument parameters in Alian's implementation, and must be removed if you wish to run his legacy code
 
 ## For MNIST
 ```python
-python main.py --dataset=MNIST --model=cnn --alpha=1 --num_users=5 --local_ep=5 --partition_size=3
+python main.py --dataset=MNIST --model=cnn --alpha=1 --num_users=5 --local_ep=5 --partition_size=3 --pow=True
 ```
 
 ## For CIFAR-10
 ```python
-python main.py --dataset=CIFAR10 --model=cnn --alpha=1 --num_users=5 --local_ep=5 --partition_size=3
+python main.py --dataset=CIFAR10 --model=cnn --alpha=1 --num_users=5 --local_ep=5 --partition_size=3 --pow=True
 ```

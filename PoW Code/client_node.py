@@ -11,8 +11,6 @@ class ClientNodeClass():
         self.node_id = node_id
         self.network = network
         self.node_list = None
-        self.route_volunteer = None
-        self.route_volunteer_available = True
 
     def receiveMessage(self, sender_id, message):
         if len(message.keys()) != 1:
