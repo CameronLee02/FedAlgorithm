@@ -28,20 +28,28 @@ class NetworkSimulationClass():
             "epoch_times": [],
             "acc_score": [],
             "loss_score": [],
-            "total_time": 0,
+            "total_time": [],
             "pow_time": [],
             "route_generation_time": [],
             "noise_calc_time": [],
-            "training_time": [],
+            "training_times": [],
             "pow_num_transmissions": [],
             "route_generation_num_transmissions": [],
             "noise_calc_num_transmissions": [],
-            "training_num_transmissions": [],
-            "model_distribution_times": [],
+            "other_num_transmissions": [],
+            "key_generation_time": [],
             "encryption_times": [],
             "aggregation_times": [],
             "decryption_times": [],
             "update_times": [],
+            "pow_memory": [],
+            "route_memory": [],
+            "noise_memory": [],
+            "key_gen_memory": [],
+            "encryption_memory": [],
+            "aggregation_memory": [],
+            "decryption_memory": [],
+            "update_memory": [],
             "dataset_info": {},
             "system_info": {
                 "platform": platform.system(),
@@ -81,8 +89,8 @@ class NetworkSimulationClass():
     def checkReason(self, reason):
         if reason == "pow":
             self.overhead_info["pow_num_transmissions"][self.overhead_info["epoch_num"]] += 1
-        elif reason == "training":
-            self.overhead_info["training_num_transmissions"][self.overhead_info["epoch_num"]] += 1
+        elif reason == "other":
+            self.overhead_info["other_num_transmissions"][self.overhead_info["epoch_num"]] += 1
         elif reason == "route":
             self.overhead_info["route_generation_num_transmissions"][self.overhead_info["epoch_num"]] += 1
         elif reason == "noise":
@@ -122,7 +130,6 @@ class NetworkSimulationClass():
         
         encryption_time = time.time() - start_time
         self.updateText(f"Encryption completed in {encryption_time:.4f} seconds.", text_widget)
-        self.overhead_info["encryption_times"].append(encryption_time)
         return encrypted_weights
 
     def aggregateEncryptedWeights(self, encrypted_weights1, encrypted_weights2, text_widget):
@@ -138,7 +145,6 @@ class NetworkSimulationClass():
         
         aggregation_time = time.time() - start_time
         self.updateText(f"Encrypted weights aggregation completed in {aggregation_time:.4f} seconds.", text_widget)
-        self.overhead_info["aggregation_times"].append(aggregation_time)
         return aggregated_weights
 
     def updateDisplayNetwork(self, G, visualisation_canvas, visualisation_ax, colours, pos):
@@ -222,27 +228,6 @@ class NetworkSimulationClass():
         for key, value in info["dataset_info"].items():
             results_text.insert(tk.END, f"{key}: {value}\n")
 
-        results_text.insert(tk.END, "\nOverhead Information:\n")
-        results_text.insert(tk.END, f"Total Time: {info['total_time']:.2f} seconds\n")
-        for i, epoch_time in enumerate(info["epoch_times"]):
-            results_text.insert(tk.END, f"Epoch {i + 1} Time: {epoch_time:.2f} seconds\n")
-
-        results_text.insert(tk.END, "\nModel Distribution Times:\n")
-        for i, model_time in enumerate(info["model_distribution_times"]):
-            results_text.insert(tk.END, f"Epoch {i + 1} Model Distribution Time: {model_time:.2f} seconds\n")
-
-        results_text.insert(tk.END, "\nEncryption Times:\n")
-        for i, enc_time in enumerate(info["encryption_times"]):
-            results_text.insert(tk.END, f"Epoch {i + 1} Encryption Time: {enc_time:.2f} seconds\n")
-
-        results_text.insert(tk.END, "\nAggregation Times:\n")
-        for i, agg_time in enumerate(info["aggregation_times"]):
-            results_text.insert(tk.END, f"Epoch {i + 1} Aggregation Time: {agg_time:.2f} seconds\n")
-
-        results_text.insert(tk.END, "\nDecryption Times:\n")
-        for i, dec_time in enumerate(info["decryption_times"]):
-            results_text.insert(tk.END, f"Epoch {i + 1} Decryption Time: {dec_time:.2f} seconds\n")
-
         results_text.config(state=tk.DISABLED)
 
     def create_gui(self):
@@ -296,10 +281,7 @@ class NetworkSimulationClass():
 
 
         def startLearningProcess():
-            start_time = time.time()
             self.initialiseLearningFixtures(text_area, ax1, ax2, fig, canvas, visualisation_canvas, visualisation_ax)
-            total_time = time.time() - start_time
-            text_area.insert(tk.END, f"Total time for completion: {total_time / 60:.2f} minutes.")
 
         thread = threading.Thread(target=startLearningProcess)
         thread.start()

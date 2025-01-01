@@ -4,6 +4,7 @@ import random
 import hashlib 
 import copy
 import numpy as np
+import psutil
 
 from models.Update import LocalUpdate
 
@@ -443,22 +444,20 @@ class ClientNodeClass():
                 sha.update(str(parameter).encode('utf-8'))
                 return sha.hexdigest()
         
-    def client_training(self, client_id, dataset_train, dict_party_user, net_glob, text_widget, context, overhead_info, G, visualisation_canvas, visualisation_ax, colours, pos):
+    def client_training(self, client_id, dataset_train, dict_party_user, net_glob, text_widget, context, overhead_info, train_time_list, encryption_time_list, aggregate_time_list, 
+                        encryption_mem_list, aggregate_mem_list, G, visualisation_canvas, visualisation_ax, colours, pos):
         self.network.updateText(f'Starting training on client {client_id}', text_widget)
 
         local = LocalUpdate(args=self.args, dataset=dataset_train, idxs=dict_party_user[client_id])
 
         # Measure model distribution (downloading the model to the client)
-        start_model_distribution = time.time()
         net_glob.load_state_dict(copy.deepcopy(net_glob.state_dict()))
-        model_distribution_time = time.time() - start_model_distribution
-        overhead_info["model_distribution_times"].append(model_distribution_time)
-        overhead_info["training_num_transmissions"][overhead_info["epoch_num"]] += 1 #count model distribution as apart of training section
-
-        self.network.updateText(f"Model distributed to client {client_id} in {model_distribution_time:.4f} seconds.", text_widget)
+        overhead_info["other_num_transmissions"][overhead_info["epoch_num"]] += 1 #count model distribution as apart of training section
 
         # Training the local model
+        startTrainTime = time.time()
         local_weights, loss = local.train(net=copy.deepcopy(net_glob).to(self.args.device))
+        train_time_list.append(time.time() - startTrainTime)
 
         if self.network.checkForNan(local_weights, f"Client {client_id} local weights after training", text_widget):
             raise ValueError(f"NaN detected in Client {client_id} local weights after training.")
@@ -469,8 +468,7 @@ class ClientNodeClass():
         self.network.updateDisplayNetwork(G, visualisation_canvas, visualisation_ax, colours, pos)
 
         self.network.updateText(f'Client {client_id} has completed training. Loss: {loss:.4f}', text_widget)
-        self.network.logWeightStats(local_weights, f"Client {client_id} local weights before encryption", text_widget)
-
+        #self.network.logWeightStats(local_weights, f"Client {client_id} local weights before encryption", text_widget)
 
         if self.network.checkForNan(local_weights, f"Client {client_id} local weights before encryption", text_widget):
             raise ValueError(f"NaN detected in Client {client_id} local weights before encryption.")
@@ -479,13 +477,20 @@ class ClientNodeClass():
         self.noise = round(random.uniform(10, 100),4)
 
         # Encryption of local weights
+        encrypt_memory = psutil.virtual_memory()[3]
+        startEncryptTime = time.time()
         encrypted_weights = self.network.encryptWeights(local_weights, context, text_widget, self.noise)
+        encryption_time_list.append(time.time() - startEncryptTime)
+        encryption_mem_list.append(psutil.virtual_memory()[3] - encrypt_memory)
+
         
         #This while loop is used to make the node wait for it's predecessor
         while self.received_encrypted_weights == None and self.predecessor_id != None:
             time.sleep(0.1)
 
         # Aggregation with previously received encrypted weights (if applicable)
+        aggregate_memory = psutil.virtual_memory()[3]
+        startAggregateTime = time.time()
         if self.predecessor_id is not None:
             current_encrypted_weights = self.network.aggregateEncryptedWeights(
                 self.received_encrypted_weights,
@@ -495,13 +500,15 @@ class ClientNodeClass():
         else:
             current_encrypted_weights = encrypted_weights
             self.local_losses = []
-        
+        aggregate_time_list.append(time.time() - startAggregateTime)
+        aggregate_mem_list.append(psutil.virtual_memory()[3] - aggregate_memory)
+
         self.local_losses.append(loss)
         
         if self.successor_id is not None:
-            self.network.messageSingleNode(self.node_id, self.successor_id, {"ENCRYPTED_WEIGHTS": [current_encrypted_weights, self.local_losses.copy()]}, "training")
+            self.network.messageSingleNode(self.node_id, self.successor_id, {"ENCRYPTED_WEIGHTS": [current_encrypted_weights, self.local_losses.copy()]}, "other")
         else:
-            self.network.messageCentralServer(self.node_id, {"ENCRYPTED_WEIGHTS": [current_encrypted_weights, self.local_losses.copy()]}, "training")
+            self.network.messageCentralServer(self.node_id, {"ENCRYPTED_WEIGHTS": [current_encrypted_weights, self.local_losses.copy()]}, "other")
         
         self.local_losses = [] #Resets the nodes recorded losses and encrypted weights for next epoch 
         self.received_encrypted_weights = None

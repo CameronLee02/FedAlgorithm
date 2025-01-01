@@ -7,6 +7,8 @@ import networkx as nx
 from models.test import test_fun
 import statistics
 import csv
+import os
+import psutil
 
 class ServerNodeClass():
     def __init__(self, node_id, network, args):
@@ -32,7 +34,8 @@ class ServerNodeClass():
         if "VALIDATED_POW" in message.keys() and sender_id in self.node_list.keys():
             pow_results = message["VALIDATED_POW"]
             if pow_results == True:
-                self.overhead_info["pow_time"][self.overhead_info["epoch_num"]] = time.time() - self.pow_start_time 
+                self.overhead_info["pow_time"].append(time.time() - self.pow_start_time)
+                self.overhead_info["pow_memory"].append(psutil.virtual_memory()[3]- self.pow_memory)
                 self.startRouteCalc(False)
         
         if "VALIDATED_NODE_ROUTE" in message.keys() and sender_id in self.node_list.keys():
@@ -40,7 +43,8 @@ class ServerNodeClass():
             self.predecessors = [] #holds the IDs of all the central server's predecessors. So it knows who to look out for
             for route in self.route:
                 self.predecessors.append(route[-1])
-            self.overhead_info["route_generation_time"][self.overhead_info["epoch_num"]] = time.time() - self.route_start_time 
+            self.overhead_info["route_generation_time"].append(time.time() - self.route_start_time)
+            self.overhead_info["route_memory"].append(psutil.virtual_memory()[3] - self.route_memory)
         
         if "ENCRYPTED_WEIGHTS" in message.keys() and sender_id in self.node_list.keys() and sender_id in self.predecessors:
             self.received_encrypted_weights_list.append(message["ENCRYPTED_WEIGHTS"][0])
@@ -56,6 +60,7 @@ class ServerNodeClass():
     def sendOutListOfNodes(self):
         if self.args.pow:
             print("Sent out the pow start message")
+            self.pow_memory = psutil.virtual_memory()[3]
             self.pow_start_time = time.time()
             self.network.messageAllNodesExcludeServer(0, {"NODE_LIST" : list(self.node_list.keys())}, "pow")
         else:
@@ -63,6 +68,7 @@ class ServerNodeClass():
         
     def startRouteCalc(self, send_list):
         print("Sent out the route start message")
+        self.route_memory = psutil.virtual_memory()[3]
         self.route_start_time = time.time()
         if send_list:
             self.network.messageAllNodesExcludeServer(0, {"START_ROUTE_GEN" : list(self.node_list.keys())}, "route")
@@ -92,7 +98,7 @@ class ServerNodeClass():
             decrypted_array = ((np.array(decrypted_flat, dtype=np.float32) / client_count) - noise / client_count).reshape(original_shapes[name]) ### REMOVE NOISE HERE
             decrypted_weights[name] = torch.tensor(decrypted_array, dtype=torch.float32)
 
-            self.network.logWeightStats({name: decrypted_weights[name]}, "Decrypted Weights", text_widget)
+            #self.network.logWeightStats({name: decrypted_weights[name]}, "Decrypted Weights", text_widget)
 
             if self.network.checkForNan({name: decrypted_weights[name]}, "Decrypted Weights", text_widget):
                 raise ValueError(f"NaN detected in decrypted weights: {name}")
@@ -128,6 +134,7 @@ class ServerNodeClass():
         return colours, pos, G
 
     def calculateNoise(self):
+        noise_memory = psutil.virtual_memory()[3]
         noise_start_time = time.time()
         self.noise_values = []
         self.noise_values_count = 0 #keeps track of how many nodes have sent back their calculated noise
@@ -147,7 +154,8 @@ class ServerNodeClass():
         for noise in self.noise_values:
             self.noise_added += statistics.mode(noise)
         print(f"Central server received: {self.noise_added }")
-        self.overhead_info["noise_calc_time"][self.overhead_info["epoch_num"]] = time.time() - noise_start_time
+        self.overhead_info["noise_calc_time"].append(time.time() - noise_start_time)
+        self.overhead_info["noise_memory"].append(psutil.virtual_memory()[3] - noise_memory)
 
     def updateOverheadDict(self, epoch_num):
         self.overhead_info["epoch_num"] = epoch_num
@@ -155,16 +163,10 @@ class ServerNodeClass():
         self.overhead_info["pow_num_transmissions"].append(0)
         self.overhead_info["route_generation_num_transmissions"].append(0)
         self.overhead_info["noise_calc_num_transmissions"].append(0)
-        self.overhead_info["training_num_transmissions"].append(0)
-
-        self.overhead_info["pow_time"].append(0)
-        self.overhead_info["route_generation_time"].append(0)
-        self.overhead_info["noise_calc_time"].append(0)
-        self.overhead_info["training_time"].append(0)
+        self.overhead_info["other_num_transmissions"].append(0)
     
     def trainingProcess(self, net_glob, dataset_train, dict_party_user, text_widget, visualisation_canvas, visualisation_ax, overhead_info, ax1, ax2, canvas):
         self.overhead_info = overhead_info
-        context = self.create_ckks_context()
 
         net_glob.train()
 
@@ -175,7 +177,15 @@ class ServerNodeClass():
         
         for iter in range(self.args.epochs):
             self.updateOverheadDict(iter)
+
             epoch_start_time = time.time()
+
+            key_gen_memory = psutil.virtual_memory()[3]
+            key_gen_time = time.time()
+            context = self.create_ckks_context()
+            self.overhead_info["key_generation_time"].append(time.time() - key_gen_time)
+            self.overhead_info["key_gen_memory"].append(psutil.virtual_memory()[3] - key_gen_memory)
+
             self.network.updateText(f'+++ Epoch {iter + 1} starts +++', text_widget)
 
             self.sendOutListOfNodes()
@@ -193,7 +203,14 @@ class ServerNodeClass():
             for route in self.route:
                 nodes += route
 
-            training_start_time = time.time()
+            train_time_list = []
+            encryption_time_list = []
+            aggregate_time_list = []
+
+            encryption_mem_list = []
+            aggregate_mem_list = []
+
+
             for node_id in nodes:
                 node_object = self.node_list[node_id]
                 thread = threading.Thread(
@@ -205,6 +222,11 @@ class ServerNodeClass():
                         text_widget,
                         context,
                         self.overhead_info,
+                        train_time_list,
+                        encryption_time_list,
+                        aggregate_time_list,
+                        encryption_mem_list,
+                        aggregate_mem_list,
                         G, #this parameter and below are used for route visualisation
                         visualisation_canvas,
                         visualisation_ax,
@@ -218,25 +240,36 @@ class ServerNodeClass():
             for thread in threads:
                 thread.join()
 
+            self.network.updateText('Final clients sending aggregated encrypted weights to server.', text_widget)
+
             received_encrypted_weights = self.received_encrypted_weights_list[0]
             for i in range(1, len(self.received_encrypted_weights_list)):
-                received_encrypted_weights = self.network.aggregateEncryptedWeights(
-                received_encrypted_weights,
-                self.received_encrypted_weights_list[i],
-                text_widget
-            )
-            self.overhead_info["training_time"][self.overhead_info["epoch_num"]] = time.time() - training_start_time
+                aggregateStartTime = time.time()
+                received_encrypted_weights = self.network.aggregateEncryptedWeights(received_encrypted_weights, self.received_encrypted_weights_list[i], text_widget)
+                aggregate_time_list.append(time.time() - aggregateStartTime)
+
+            self.overhead_info["encryption_times"].append(statistics.mean(encryption_time_list))
+            self.overhead_info["aggregation_times"].append(statistics.mean(aggregate_time_list))
+            self.overhead_info["training_times"].append(statistics.mean(train_time_list))
+
+            self.overhead_info["encryption_memory"].append(statistics.mean(encryption_mem_list))
+            self.overhead_info["aggregation_memory"].append(statistics.mean(aggregate_mem_list))
             self.calculateNoise()
 
-            self.network.updateText('Final client sending aggregated encrypted weights to server.', text_widget)
+            decrypt_memory = psutil.virtual_memory()[3]
             decrypted_weights = self.decryptWeights(received_encrypted_weights, context, original_shapes, text_widget, len(nodes), self.noise_added)
+            self.overhead_info["decryption_memory"].append(psutil.virtual_memory()[3] - decrypt_memory)
 
             if self.network.checkForNan(decrypted_weights, "Global Model Weights", text_widget):
                 raise ValueError("NaN detected in global model weights before updating.")
             
-            self.network.logWeightStats(decrypted_weights, "Global Model Weights", text_widget)
+            #self.network.logWeightStats(decrypted_weights, "Global Model Weights", text_widget)
 
+            update_memory = psutil.virtual_memory()[3]
+            update_start_time = time.time()
             net_glob.load_state_dict(decrypted_weights)
+            self.overhead_info["update_times"].append(time.time() - update_start_time)
+            self.overhead_info["update_memory"].append(psutil.virtual_memory()[3] - update_memory)
             self.network.updateText('Server has updated the global model with final aggregated weights.', text_widget)
 
             net_glob.eval()
@@ -249,28 +282,56 @@ class ServerNodeClass():
             self.network.updateText(f'Epoch {iter + 1} completed. Train Acc: {acc_train:.2f}', text_widget)
             self.network.updatePlots(epoch_losses, epoch_accuracies, ax1, ax2, canvas)
 
-            epoch_end_time = time.time()
-            epoch_duration = epoch_end_time - epoch_start_time
-            self.overhead_info["epoch_times"].append(epoch_duration)
+            self.overhead_info["epoch_times"].append(time.time() - epoch_start_time)
 
             self.network.setRouteVolunteer(None)
             self.network.setPoWVolunteer(None)
             visualisation_ax.clear() #used to clear/reset the network visualisation window
             visualisation_canvas.draw()
 
-        self.overhead_info["total_time"] = time.time() - start_total_time
+        total_time_array = np.full(shape=self.overhead_info["epoch_num"]+1, fill_value=time.time() - start_total_time)
+        self.overhead_info["total_time"] = total_time_array
 
-        with open('results', 'w') as file:
+        try:
+            os.makedirs(self.args.output_directory)
+        except FileExistsError:
+            pass
+            
+        #writes the times of each portion of the experiment to a file
+        timefile = os.path.join(self.args.output_directory, self.args.output_directory + "_times.csv")
+        with open(timefile, 'w', newline='') as file:
             write = csv.writer(file)
-            write.writerow(self.overhead_info["pow_time"])
-            write.writerow(self.overhead_info["pow_num_transmissions"])
-            write.writerow(self.overhead_info["route_generation_time"])
-            write.writerow(self.overhead_info["route_generation_num_transmissions"])
-            write.writerow(self.overhead_info["noise_calc_time"])
-            write.writerow(self.overhead_info["noise_calc_num_transmissions"])
-            write.writerow(self.overhead_info["training_time"])
-            write.writerow(self.overhead_info["training_num_transmissions"])
-            write.writerow(self.overhead_info["acc_score"])
-            write.writerow(self.overhead_info["loss_score"])
+            metrics = ["pow_time", "route_generation_time", "noise_calc_time", "training_times", "key_generation_time",
+                        "encryption_times", "decryption_times", "aggregation_times", "update_times",
+                        "epoch_times", "total_time"]
+            data_rows = zip(*[self.overhead_info[metric] for metric in metrics])
+            write.writerow(metrics)
+            write.writerows(data_rows)
+
+        #writes the transmissions of each portion of the experiment to a file
+        transmissionfile = os.path.join(self.args.output_directory, self.args.output_directory + "_transmissions.csv")
+        with open(transmissionfile, 'w', newline='') as file:
+                write = csv.writer(file)
+                metrics = ["pow_num_transmissions", "route_generation_num_transmissions", "noise_calc_num_transmissions", "other_num_transmissions"]
+                data_rows = zip(*[self.overhead_info[metric] for metric in metrics])
+                write.writerow(metrics)
+                write.writerows(data_rows)
+
+        #writes the accuracy and loss of each epoch of the experiment to a file
+        scoresfile = os.path.join(self.args.output_directory, self.args.output_directory + "_scores.csv")
+        with open(scoresfile, 'w', newline='') as file:
+                write = csv.writer(file)
+                metrics = ["acc_score", "loss_score"]
+                data_rows = zip(*[self.overhead_info[metric] for metric in metrics])
+                write.writerow(metrics)
+                write.writerows(data_rows)
         
+        #writes the memory used for of each portion of the experiment to a file
+        memoryfile = os.path.join(self.args.output_directory, self.args.output_directory + "_memory.csv")
+        with open(memoryfile, 'w', newline='') as file:
+                write = csv.writer(file)
+                metrics = ["pow_memory", "route_memory", "noise_memory", "key_gen_memory", "encryption_memory", "decryption_memory", "aggregation_memory", "update_memory"]
+                data_rows = zip(*[self.overhead_info[metric] for metric in metrics])
+                write.writerow(metrics)
+                write.writerows(data_rows)
         return acc_train
