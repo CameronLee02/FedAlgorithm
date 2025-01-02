@@ -17,7 +17,7 @@ def get_dataset(args):
 
         # Sample non-iid data
         dict_party_user, dict_sample_user = sample_dirichlet_train_data(
-            train_dataset, args.num_users, args.num_samples, args.alpha)
+            train_dataset, args.num_users+1, args.num_samples, args.alpha)
 
     # MNIST: 10 classes, 60,000 training examples, 10,000 testing examples.
     elif args.dataset == 'MNIST':
@@ -33,7 +33,7 @@ def get_dataset(args):
 
         # Sample non-iid data
         dict_party_user, dict_sample_user = sample_dirichlet_train_data(
-            train_dataset, args.num_users, args.num_samples, args.alpha)
+            train_dataset, args.num_users+1, args.num_samples, args.alpha)
 
     # Synthetic dataset: 10 classes, 100,000 examples.
     elif args.dataset == 'Synthetic' and args.iid:

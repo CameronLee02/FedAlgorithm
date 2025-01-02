@@ -4,7 +4,6 @@ import random
 import hashlib 
 import copy
 import numpy as np
-import psutil
 
 from models.Update import LocalUpdate
 
@@ -447,7 +446,7 @@ class ClientNodeClass():
     def client_training(self, client_id, dataset_train, dict_party_user, net_glob, text_widget, context, overhead_info, train_time_list, encryption_time_list, aggregate_time_list, 
                         encryption_mem_list, aggregate_mem_list, G, visualisation_canvas, visualisation_ax, colours, pos):
         self.network.updateText(f'Starting training on client {client_id}', text_widget)
-
+    
         local = LocalUpdate(args=self.args, dataset=dataset_train, idxs=dict_party_user[client_id])
 
         # Measure model distribution (downloading the model to the client)
@@ -477,11 +476,11 @@ class ClientNodeClass():
         self.noise = round(random.uniform(10, 100),4)
 
         # Encryption of local weights
-        encrypt_memory = psutil.virtual_memory()[3]
+        encrypt_memory = self.network.get_memory_usage()
         startEncryptTime = time.time()
         encrypted_weights = self.network.encryptWeights(local_weights, context, text_widget, self.noise)
         encryption_time_list.append(time.time() - startEncryptTime)
-        encryption_mem_list.append(psutil.virtual_memory()[3] - encrypt_memory)
+        encryption_mem_list.append(self.network.get_memory_usage() - encrypt_memory)
 
         
         #This while loop is used to make the node wait for it's predecessor
@@ -489,7 +488,7 @@ class ClientNodeClass():
             time.sleep(0.1)
 
         # Aggregation with previously received encrypted weights (if applicable)
-        aggregate_memory = psutil.virtual_memory()[3]
+        aggregate_memory = self.network.get_memory_usage()
         startAggregateTime = time.time()
         if self.predecessor_id is not None:
             current_encrypted_weights = self.network.aggregateEncryptedWeights(
@@ -501,7 +500,7 @@ class ClientNodeClass():
             current_encrypted_weights = encrypted_weights
             self.local_losses = []
         aggregate_time_list.append(time.time() - startAggregateTime)
-        aggregate_mem_list.append(psutil.virtual_memory()[3] - aggregate_memory)
+        aggregate_mem_list.append(self.network.get_memory_usage() - aggregate_memory)
 
         self.local_losses.append(loss)
         

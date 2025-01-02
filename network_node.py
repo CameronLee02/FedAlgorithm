@@ -12,7 +12,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from models.Nets import MLP, Mnistcnn, Cifar10cnn
-from utils.dataset_limit import get_dataset, exp_details
+from utils.dataset import get_dataset, exp_details
 
 class NetworkSimulationClass():
     def __init__(self, args):
@@ -95,6 +95,10 @@ class NetworkSimulationClass():
             self.overhead_info["route_generation_num_transmissions"][self.overhead_info["epoch_num"]] += 1
         elif reason == "noise":
             self.overhead_info["noise_calc_num_transmissions"][self.overhead_info["epoch_num"]] += 1
+        
+    def get_memory_usage(self):
+        process = psutil.Process()
+        return process.memory_info().rss
 
     def updateText(self, message, text_widget):
         text_widget.insert(tk.END, message + '\n')
@@ -179,6 +183,7 @@ class NetworkSimulationClass():
             "train_size": len(dataset_train),
             "test_size": len(dataset_test)
         }
+        print(self.overhead_info["dataset_info"])
 
         if self.args.model == 'cnn':
             if self.args.dataset == 'MNIST':

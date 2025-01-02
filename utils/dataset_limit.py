@@ -10,7 +10,7 @@ def get_dataset(args):
 
     # mnist dataset: 10 classes, 60000 training examples, 10000 testing examples.
     # synthetic dataset: 10 classes, 100,000 examples.
-
+    '''
     if args.dataset == 'MNIST':
         data_dir = './data/mnist/'
 
@@ -25,7 +25,7 @@ def get_dataset(args):
                                       transform=apply_transform)
         # sample non-iid data
         dict_party_user, dict_sample_user = sample_dirichlet_train_data(train_dataset, args.num_users+1, args.num_samples,
-                                                                        args.alpha)
+                                                                        args.alpha)'''
 
 
     # Parameters to control the size of the dataset
@@ -55,6 +55,24 @@ def get_dataset(args):
         # Sample non-IID data
         dict_party_user, dict_sample_user = sample_dirichlet_train_data(train_dataset, args.num_users+1, args.num_samples,
                                                                         args.alpha)
+    elif args.dataset == 'CIFAR10':
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
+        train_dataset = datasets.CIFAR10(root='./data/cifar10', train=True, download=True, transform=transform)
+        test_dataset = datasets.CIFAR10(root='./data/cifar10', train=False, download=True, transform=transform)
+
+        # Limit the size of the dataset by taking a subset
+        train_indices = list(range(small_train_size))
+        test_indices = list(range(small_test_size))
+
+        train_dataset = Subset(train_dataset, train_indices)
+        test_dataset = Subset(test_dataset, test_indices)
+
+        # Sample non-iid data
+        dict_party_user, dict_sample_user = sample_dirichlet_train_data(
+            train_dataset, args.num_users+1, args.num_samples, args.alpha)
 
     elif args.dataset == 'Synthetic' and args.iid == True:
         data_dir = './data/synthetic/synthetic_x_0.npz'
