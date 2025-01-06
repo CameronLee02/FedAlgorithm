@@ -43,10 +43,15 @@ You can try different `--alpha` (data distribution), `--num_users`(number of par
 
 ## For MNIST
 ```python
-python main.py --dataset=MNIST --model=cnn --alpha=1 --num_users=5 --local_ep=5 --partition_size=3 --pow=True --output_directory=results
+python main.py --dataset=MNIST --model=cnn --alpha=1 --num_users=5 --local_ep=5 --partition_size=5 --pow=True --output_directory=results
 ```
 
 ## For CIFAR-10
 ```python
-python main.py --dataset=CIFAR10 --model=cnn --alpha=1 --num_users=5 --local_ep=5 --partition_size=3 --pow=True --output_directory=results
+python main.py --dataset=CIFAR10 --model=cnn --alpha=1 --num_users=5 --local_ep=5 --partition_size=5 --pow=True --output_directory=results
+```
+
+## For SVHN
+```python
+python main.py --dataset=SVHN --model=cnn --alpha=1 --num_users=5 --local_ep=5 --partition_size=5 --pow=True --output_directory=results
 ```

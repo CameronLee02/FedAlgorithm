@@ -34,6 +34,19 @@ def get_dataset(args):
         # Sample non-iid data
         dict_party_user, dict_sample_user = sample_dirichlet_train_data(
             train_dataset, args.num_users+1, args.num_samples, args.alpha)
+    
+    # SVHN: Street View House Numbers dataset
+    elif args.dataset == 'SVHN':
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)), 
+        ])
+        train_dataset = datasets.SVHN(root='./data/svhn', split='train', download=True, transform=transform)
+        test_dataset = datasets.SVHN(root='./data/svhn', split='test', download=True, transform=transform)
+
+        # Sample non-iid data
+        dict_party_user, dict_sample_user = sample_dirichlet_train_data(
+            train_dataset, args.num_users+1, args.num_samples, args.alpha)
 
     # Synthetic dataset: 10 classes, 100,000 examples.
     elif args.dataset == 'Synthetic' and args.iid:

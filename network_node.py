@@ -11,7 +11,7 @@ import psutil  # For system information
 import networkx as nx
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from models.Nets import MLP, Mnistcnn, Cifar10cnn
+from models.Nets import MLP, Mnistcnn, Cifar10cnn, SvhnCnn
 from utils.dataset import get_dataset, exp_details
 
 class NetworkSimulationClass():
@@ -190,6 +190,8 @@ class NetworkSimulationClass():
                 net_glob = Mnistcnn(args=self.args).to(self.args.device)
             elif self.args.dataset == 'CIFAR10':
                 net_glob = Cifar10cnn(args=self.args).to(self.args.device)
+            elif self.args.dataset == 'SVHN':
+                net_glob = SvhnCnn(args=self.args).to(self.args.device)
             else:
                 self.updateText('Error: unrecognized dataset for CNN model', text_widget)
                 return
@@ -210,41 +212,20 @@ class NetworkSimulationClass():
 
         exp_details(self.args)
         self.updateText("Training complete. Final Accuracy: {:.2f}".format(acc_train), text_widget)
-        self.showResultsWindow()
+        self.root.quit()
+        exit()
     
-    def showResultsWindow(self):
-        info = self.overhead_info
-        result_window = tk.Toplevel()
-        result_window.title("Overhead Evaluation Results")
-
-        title_font = font.Font(family="San Francisco", size=18, weight="bold")
-        content_font = font.Font(family="San Francisco", size=12)
-
-        tk.Label(result_window, text="Overhead Evaluation Results", font=title_font).pack(pady=10)
-        
-        results_text = tk.Text(result_window, wrap=tk.WORD, font=content_font)
-        results_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-        results_text.insert(tk.END, "System Information:\n")
-        for key, value in info["system_info"].items():
-            results_text.insert(tk.END, f"{key}: {value}\n")
-
-        results_text.insert(tk.END, "\nDataset Information:\n")
-        for key, value in info["dataset_info"].items():
-            results_text.insert(tk.END, f"{key}: {value}\n")
-
-        results_text.config(state=tk.DISABLED)
 
     def create_gui(self):
         '''Create the GUI window for the Federated Learning process'''
-        root = tk.Tk()
-        root.title('Federated Learning Simulation with CKKS Encryption')
+        self.root = tk.Tk()
+        self.root.title('Federated Learning Simulation with CKKS Encryption')
 
         custom_font = font.Font(family="San Francisco", size=16)
-        text_area = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=50, height=10, font=custom_font)
+        text_area = scrolledtext.ScrolledText(self.root, wrap=tk.WORD, width=50, height=10, font=custom_font)
         text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.visualisation_window = tk.Toplevel(root)
+        self.visualisation_window = tk.Toplevel(self.root)
         self.visualisation_window.minsize(800,600)
         self.visualisation_window.title("Route Visualisation Window")
         self.visualisation_window.protocol("WM_DELETE_WINDOW", lambda: None)
@@ -271,7 +252,7 @@ class NetworkSimulationClass():
             else:
                 print("Cannot open Visualisation Window. It is already open")
 
-        frame = tk.Frame(root, bg='lightblue')
+        frame = tk.Frame(self.root, bg='lightblue')
         frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
         route_visualisation_btn = tk.Button(frame, 
@@ -284,14 +265,10 @@ class NetworkSimulationClass():
         canvas = FigureCanvasTkAgg(fig, master=frame)
         canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-
-        def startLearningProcess():
-            self.initialiseLearningFixtures(text_area, ax1, ax2, fig, canvas, visualisation_canvas, visualisation_ax)
-
-        thread = threading.Thread(target=startLearningProcess)
+        thread = threading.Thread(target=self.initialiseLearningFixtures(text_area, ax1, ax2, fig, canvas, visualisation_canvas, visualisation_ax))
         thread.start()
 
-        root.mainloop()
+        self.root.mainloop()
     
     #Adds a node to the network. ID:0 is reserved for the central server
     def addNode(self, node):
