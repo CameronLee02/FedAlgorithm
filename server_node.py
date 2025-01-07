@@ -35,7 +35,6 @@ class ServerNodeClass():
             pow_results = message["VALIDATED_POW"]
             if pow_results == True:
                 self.overhead_info["pow_time"].append(time.time() - self.pow_start_time)
-                self.overhead_info["pow_memory"].append(self.network.get_memory_usage() - self.pow_memory)
                 self.startRouteCalc(False)
         
         if "VALIDATED_NODE_ROUTE" in message.keys() and sender_id in self.node_list.keys():
@@ -44,7 +43,6 @@ class ServerNodeClass():
             for route in self.route:
                 self.predecessors.append(route[-1])
             self.overhead_info["route_generation_time"].append(time.time() - self.route_start_time)
-            self.overhead_info["route_memory"].append(self.network.get_memory_usage() - self.route_memory)
         
         if "ENCRYPTED_WEIGHTS" in message.keys() and sender_id in self.node_list.keys() and sender_id in self.predecessors:
             self.received_encrypted_weights_list.append(message["ENCRYPTED_WEIGHTS"][0])
@@ -59,9 +57,7 @@ class ServerNodeClass():
     #This function is used to simulate the central server sending a list of the participating to all the nodes 
     def sendOutListOfNodes(self):
         if self.args.pow:
-            print("Sent out the pow start message")
-            gc.collect()
-            self.pow_memory = self.network.get_memory_usage() 
+            print("Sent out the pow start message") 
             self.pow_start_time = time.time()
             self.network.messageAllNodesExcludeServer(0, {"NODE_LIST" : list(self.node_list.keys())}, "pow")
         else:
@@ -69,8 +65,6 @@ class ServerNodeClass():
         
     def startRouteCalc(self, send_list):
         print("Sent out the route start message")
-        gc.collect()
-        self.route_memory = self.network.get_memory_usage()
         self.route_start_time = time.time()
         if send_list:
             self.network.messageAllNodesExcludeServer(0, {"START_ROUTE_GEN" : list(self.node_list.keys())}, "route")
@@ -136,8 +130,6 @@ class ServerNodeClass():
         return colours, pos, G
 
     def calculateNoise(self):
-        gc.collect()
-        noise_memory = self.network.get_memory_usage()
         noise_start_time = time.time()
         self.noise_values = []
         self.noise_values_count = 0 #keeps track of how many nodes have sent back their calculated noise
@@ -158,7 +150,6 @@ class ServerNodeClass():
             self.noise_added += statistics.mode(noise)
         print(f"Central server received: {self.noise_added }")
         self.overhead_info["noise_calc_time"].append(time.time() - noise_start_time)
-        self.overhead_info["noise_memory"].append(self.network.get_memory_usage() - noise_memory)
 
     def updateOverheadDict(self, epoch_num):
         self.overhead_info["epoch_num"] = epoch_num
@@ -183,12 +174,9 @@ class ServerNodeClass():
 
             epoch_start_time = time.time()
 
-            gc.collect()
-            key_gen_memory = self.network.get_memory_usage()
             key_gen_time = time.time()
             context = self.create_ckks_context()
             self.overhead_info["key_generation_time"].append(time.time() - key_gen_time)
-            self.overhead_info["key_gen_memory"].append(self.network.get_memory_usage() - key_gen_memory)
 
             self.network.updateText(f'+++ Epoch {iter + 1} starts +++', text_widget)
 
@@ -211,10 +199,6 @@ class ServerNodeClass():
             encryption_time_list = []
             aggregate_time_list = []
 
-            encryption_mem_list = []
-            aggregate_mem_list = []
-
-
             for node_id in nodes:
                 node_object = self.node_list[node_id]
                 thread = threading.Thread(
@@ -229,8 +213,6 @@ class ServerNodeClass():
                         train_time_list,
                         encryption_time_list,
                         aggregate_time_list,
-                        encryption_mem_list,
-                        aggregate_mem_list,
                         G, #this parameter and below are used for route visualisation
                         visualisation_canvas,
                         visualisation_ax,
@@ -255,27 +237,19 @@ class ServerNodeClass():
             self.overhead_info["encryption_times"].append(statistics.mean(encryption_time_list))
             self.overhead_info["aggregation_times"].append(statistics.mean(aggregate_time_list))
             self.overhead_info["training_times"].append(statistics.mean(train_time_list))
-
-            self.overhead_info["encryption_memory"].append(statistics.mean(encryption_mem_list))
-            self.overhead_info["aggregation_memory"].append(statistics.mean(aggregate_mem_list))
+            
             self.calculateNoise()
 
-            gc.collect()
-            decrypt_memory = self.network.get_memory_usage()
             decrypted_weights = self.decryptWeights(received_encrypted_weights, context, original_shapes, text_widget, len(nodes), self.noise_added)
-            self.overhead_info["decryption_memory"].append(self.network.get_memory_usage() - decrypt_memory)
 
             if self.network.checkForNan(decrypted_weights, "Global Model Weights", text_widget):
                 raise ValueError("NaN detected in global model weights before updating.")
             
             #self.network.logWeightStats(decrypted_weights, "Global Model Weights", text_widget)
 
-            gc.collect()
-            update_memory = self.network.get_memory_usage()
             update_start_time = time.time()
             net_glob.load_state_dict(decrypted_weights)
             self.overhead_info["update_times"].append(time.time() - update_start_time)
-            self.overhead_info["update_memory"].append(self.network.get_memory_usage() - update_memory)
             self.network.updateText('Server has updated the global model with final aggregated weights.', text_widget)
 
             net_glob.eval()
@@ -328,15 +302,6 @@ class ServerNodeClass():
         with open(scoresfile, 'w', newline='') as file:
                 write = csv.writer(file)
                 metrics = ["acc_score", "loss_score"]
-                data_rows = zip(*[self.overhead_info[metric] for metric in metrics])
-                write.writerow(metrics)
-                write.writerows(data_rows)
-        
-        #writes the memory used for of each portion of the experiment to a file
-        memoryfile = os.path.join(self.args.output_directory, self.args.output_directory + "_memory.csv")
-        with open(memoryfile, 'w', newline='') as file:
-                write = csv.writer(file)
-                metrics = ["pow_memory", "route_memory", "noise_memory", "key_gen_memory", "encryption_memory", "decryption_memory", "aggregation_memory", "update_memory"]
                 data_rows = zip(*[self.overhead_info[metric] for metric in metrics])
                 write.writerow(metrics)
                 write.writerows(data_rows)

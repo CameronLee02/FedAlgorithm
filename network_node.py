@@ -42,14 +42,6 @@ class NetworkSimulationClass():
             "aggregation_times": [],
             "decryption_times": [],
             "update_times": [],
-            "pow_memory": [],
-            "route_memory": [],
-            "noise_memory": [],
-            "key_gen_memory": [],
-            "encryption_memory": [],
-            "aggregation_memory": [],
-            "decryption_memory": [],
-            "update_memory": [],
             "dataset_info": {},
             "system_info": {
                 "platform": platform.system(),
@@ -95,10 +87,7 @@ class NetworkSimulationClass():
             self.overhead_info["route_generation_num_transmissions"][self.overhead_info["epoch_num"]] += 1
         elif reason == "noise":
             self.overhead_info["noise_calc_num_transmissions"][self.overhead_info["epoch_num"]] += 1
-        
-    def get_memory_usage(self):
-        process = psutil.Process()
-        return process.memory_info().rss
+
 
     def updateText(self, message, text_widget):
         text_widget.insert(tk.END, message + '\n')
@@ -265,10 +254,14 @@ class NetworkSimulationClass():
         canvas = FigureCanvasTkAgg(fig, master=frame)
         canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-        thread = threading.Thread(target=self.initialiseLearningFixtures(text_area, ax1, ax2, fig, canvas, visualisation_canvas, visualisation_ax))
+        def startLearningProcess():
+            self.initialiseLearningFixtures(text_area, ax1, ax2, fig, canvas, visualisation_canvas, visualisation_ax)
+
+        thread = threading.Thread(target=startLearningProcess)
         thread.start()
 
         self.root.mainloop()
+        exit()
     
     #Adds a node to the network. ID:0 is reserved for the central server
     def addNode(self, node):
