@@ -92,7 +92,8 @@ class ServerNodeClass():
                 decrypted_flat.extend(enc_weight.decrypt())
 
             decrypted_array = ((np.array(decrypted_flat, dtype=np.float32) / client_count) - noise / client_count).reshape(original_shapes[name]) ### REMOVE NOISE HERE
-            decrypted_weights[name] = torch.tensor(decrypted_array, dtype=torch.float32)
+            weight_size = decrypted_array.nbytes
+            decrypted_weights[name] = torch.from_numpy(decrypted_array).clone().detach().to(dtype=torch.float32)
 
             #self.network.logWeightStats({name: decrypted_weights[name]}, "Decrypted Weights", text_widget)
 
@@ -102,7 +103,7 @@ class ServerNodeClass():
         decryption_time = time.time() - start_time
         self.network.updateText(f"Decryption completed in {decryption_time:.4f} seconds.", text_widget)
         self.overhead_info["decryption_times"].append(decryption_time)
-        return decrypted_weights
+        return decrypted_weights, weight_size
     
     def displayNetwork(self, visualisation_canvas, visualisation_ax):
 
@@ -198,6 +199,8 @@ class ServerNodeClass():
             train_time_list = []
             encryption_time_list = []
             aggregate_time_list = []
+            weight_size_before_noise_list = []
+            weight_size_after_noise_list = []
 
             for node_id in nodes:
                 node_object = self.node_list[node_id]
@@ -213,6 +216,8 @@ class ServerNodeClass():
                         train_time_list,
                         encryption_time_list,
                         aggregate_time_list,
+                        weight_size_before_noise_list, 
+                        weight_size_after_noise_list,
                         G, #this parameter and below are used for route visualisation
                         visualisation_canvas,
                         visualisation_ax,
@@ -237,10 +242,14 @@ class ServerNodeClass():
             self.overhead_info["encryption_times"].append(statistics.mean(encryption_time_list))
             self.overhead_info["aggregation_times"].append(statistics.mean(aggregate_time_list))
             self.overhead_info["training_times"].append(statistics.mean(train_time_list))
+
+            self.overhead_info["weight_size_before_noise_encryption"].append(statistics.mean(weight_size_before_noise_list))
+            self.overhead_info["weight_size_after_noise_encryption"].append(statistics.mean(weight_size_after_noise_list))
             
             self.calculateNoise()
 
-            decrypted_weights = self.decryptWeights(received_encrypted_weights, context, original_shapes, text_widget, len(nodes), self.noise_added)
+            decrypted_weights, weight_size = self.decryptWeights(received_encrypted_weights, context, original_shapes, text_widget, len(nodes), self.noise_added)
+            self.overhead_info["weight_size_decryption"].append(weight_size)
 
             if self.network.checkForNan(decrypted_weights, "Global Model Weights", text_widget):
                 raise ValueError("NaN detected in global model weights before updating.")
@@ -302,6 +311,15 @@ class ServerNodeClass():
         with open(scoresfile, 'w', newline='') as file:
                 write = csv.writer(file)
                 metrics = ["acc_score", "loss_score"]
+                data_rows = zip(*[self.overhead_info[metric] for metric in metrics])
+                write.writerow(metrics)
+                write.writerows(data_rows)
+        
+        #writes the sizes of the weight before encryption and decryption for each epoch of the experiment to a file
+        sizesfile = os.path.join(self.args.output_directory, self.args.output_directory + "_sizes.csv")
+        with open(sizesfile, 'w', newline='') as file:
+                write = csv.writer(file)
+                metrics = ["weight_size_before_noise_encryption", "weight_size_after_noise_encryption", "weight_size_decryption"]
                 data_rows = zip(*[self.overhead_info[metric] for metric in metrics])
                 write.writerow(metrics)
                 write.writerows(data_rows)

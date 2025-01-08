@@ -444,7 +444,8 @@ class ClientNodeClass():
                 return sha.hexdigest()
         
     def client_training(self, client_id, dataset_train, dict_party_user, net_glob, text_widget, context, overhead_info, train_time_list, 
-                        encryption_time_list, aggregate_time_list, G, visualisation_canvas, visualisation_ax, colours, pos):
+                        encryption_time_list, aggregate_time_list, weight_size_before_noise_list, weight_size_after_noise_list, 
+                        G, visualisation_canvas, visualisation_ax, colours, pos):
         self.network.updateText(f'Starting training on client {client_id}', text_widget)
     
         local = LocalUpdate(args=self.args, dataset=dataset_train, idxs=dict_party_user[client_id])
@@ -479,8 +480,10 @@ class ClientNodeClass():
 
         # Encryption of local weights
         startEncryptTime = time.time()
-        encrypted_weights = self.network.encryptWeights(local_weights, context, text_widget, self.noise)
+        encrypted_weights, weight_size_before_noise, weight_size_after_noise= self.network.encryptWeights(local_weights, context, text_widget, self.noise)
         encryption_time_list.append(time.time() - startEncryptTime)
+        weight_size_before_noise_list.append(weight_size_before_noise)
+        weight_size_after_noise_list.append(weight_size_after_noise)
 
         
         #This while loop is used to make the node wait for it's predecessor

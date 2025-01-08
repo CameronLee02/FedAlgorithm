@@ -41,6 +41,9 @@ class NetworkSimulationClass():
             "encryption_times": [],
             "aggregation_times": [],
             "decryption_times": [],
+            "weight_size_before_noise_encryption": [],
+            "weight_size_after_noise_encryption": [],
+            "weight_size_decryption": [],
             "update_times": [],
             "dataset_info": {},
             "system_info": {
@@ -106,6 +109,8 @@ class NetworkSimulationClass():
             self.updateText(f"{description} - {name}: mean={weight_np.mean():.4f}, max={weight_np.max():.4f}, min={weight_np.min():.4f}", text_widget)
     
     def encryptWeights(self, weights_dict, context, text_widget, noise, chunk_size=1000):
+        weight_size_before_noise = 0
+        weight_size_after_noise = 0
         start_time = time.time()
         self.updateText("Encrypting weights using CKKS encryption...", text_widget)
         encrypted_weights = {}
@@ -114,8 +119,9 @@ class NetworkSimulationClass():
             if np.isnan(weight_np).any():
                 self.updateText(f"NaN detected in {name} before encryption", text_widget)
                 continue
-
+            weight_size_before_noise += weight_np.nbytes
             noisey_weight_np = weight_np + noise ### ADD NOISE HERE
+            weight_size_after_noise += noisey_weight_np.nbytes
             
             weight_chunks = np.array_split(noisey_weight_np.flatten(), max(1, len(noisey_weight_np.flatten()) // chunk_size))
             encrypted_chunks = [ts.ckks_vector(context, chunk) for chunk in weight_chunks]
@@ -123,7 +129,7 @@ class NetworkSimulationClass():
         
         encryption_time = time.time() - start_time
         self.updateText(f"Encryption completed in {encryption_time:.4f} seconds.", text_widget)
-        return encrypted_weights
+        return encrypted_weights, weight_size_before_noise, weight_size_after_noise
 
     def aggregateEncryptedWeights(self, encrypted_weights1, encrypted_weights2, text_widget):
         start_time = time.time()
