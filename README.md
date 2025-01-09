@@ -39,19 +39,27 @@ Python TenSEAL library required for CKKS file, current setup uses Python Version
 # Implementation
 
 You can try different `--alpha` (data distribution), `--num_users`(number of parties), `--local_ep` (number of local epochs), `--partition_sizes` (minimum size of the partitions) to see how the attack performance changes, `--pow` (allow the simulation to conduct the Proof of Work or not), `--output_directory` (the name of the directory that the results will be outputted to). For `MNIST` dataset, we set `--model=cnn`.<br>
-`--partition_sizes`, `--output_directory`, and `--pow` are not valid argument parameters in Alian's implementation, and must be removed if you wish to run his legacy code
 
 ## For MNIST
 ```python
-python main.py --dataset=MNIST --model=cnn --alpha=1 --num_users=5 --local_ep=5 --partition_size=5 --pow=True --output_directory=results
+python main.py --dataset=MNIST --model=cnn --alpha=1 --num_users=10 --local_ep=5 --partition_size=10 --pow=True --output_directory=MNIST_baseline
 ```
 
 ## For CIFAR-10
 ```python
-python main.py --dataset=CIFAR10 --model=cnn --alpha=1 --num_users=5 --local_ep=5 --partition_size=5 --pow=True --output_directory=results
+python main.py --dataset=CIFAR10 --model=cnn --alpha=1 --num_users=10 --local_ep=5 --partition_size=10 --pow=True --output_directory=CIFAR10_baseline
 ```
 
 ## For SVHN
 ```python
-python main.py --dataset=SVHN --model=cnn --alpha=1 --num_users=5 --local_ep=5 --partition_size=5 --pow=True --output_directory=results
+python main.py --dataset=SVHN --model=cnn --alpha=1 --num_users=10 --local_ep=5 --partition_size=10 --pow=True --output_directory=SVHN_baseline
+```
+
+# Standard FL implementation (FedAVG)
+
+This is implementation of the standard/basic FedAVG FL algorithm and is used to compare against proposed FL scheme. It requires the same arguements as above except for `--partition_size` and `--pow`
+
+## for MNIST
+```python
+python standard_fl_implementation.py --dataset=MNIST --model=cnn --alpha=1 --num_users=10 --local_ep=5 --output_directory=MNIST_baseline_standard_fl
 ```

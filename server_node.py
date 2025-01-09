@@ -8,7 +8,7 @@ from models.test import test_fun
 import statistics
 import csv
 import os
-import gc
+import sys
 
 class ServerNodeClass():
     def __init__(self, node_id, network, args):
@@ -86,13 +86,16 @@ class ServerNodeClass():
         start_time = time.time()
         self.network.updateText("Decrypting aggregated weights using CKKS decryption...", text_widget)
         decrypted_weights = {}
+        weight_size = 0
         for name, enc_weight_chunks in encrypted_weights.items():
             decrypted_flat = []
             for enc_weight in enc_weight_chunks:
                 decrypted_flat.extend(enc_weight.decrypt())
 
-            decrypted_array = ((np.array(decrypted_flat, dtype=np.float32) / client_count) - noise / client_count).reshape(original_shapes[name]) ### REMOVE NOISE HERE
-            weight_size = decrypted_array.nbytes
+            decrypted_flat_array = np.array(decrypted_flat, dtype=np.float32)
+            weight_size += decrypted_flat_array.nbytes
+
+            decrypted_array = ((decrypted_flat_array / client_count) - noise / client_count).reshape(original_shapes[name]) ### REMOVE NOISE HERE
             decrypted_weights[name] = torch.from_numpy(decrypted_array).clone().detach().to(dtype=torch.float32)
 
             #self.network.logWeightStats({name: decrypted_weights[name]}, "Decrypted Weights", text_widget)
@@ -199,8 +202,7 @@ class ServerNodeClass():
             train_time_list = []
             encryption_time_list = []
             aggregate_time_list = []
-            weight_size_before_noise_list = []
-            weight_size_after_noise_list = []
+            weight_size_noise_list = []
 
             for node_id in nodes:
                 node_object = self.node_list[node_id]
@@ -216,8 +218,7 @@ class ServerNodeClass():
                         train_time_list,
                         encryption_time_list,
                         aggregate_time_list,
-                        weight_size_before_noise_list, 
-                        weight_size_after_noise_list,
+                        weight_size_noise_list, 
                         G, #this parameter and below are used for route visualisation
                         visualisation_canvas,
                         visualisation_ax,
@@ -243,8 +244,7 @@ class ServerNodeClass():
             self.overhead_info["aggregation_times"].append(statistics.mean(aggregate_time_list))
             self.overhead_info["training_times"].append(statistics.mean(train_time_list))
 
-            self.overhead_info["weight_size_before_noise_encryption"].append(statistics.mean(weight_size_before_noise_list))
-            self.overhead_info["weight_size_after_noise_encryption"].append(statistics.mean(weight_size_after_noise_list))
+            self.overhead_info["weight_size_noise_encryption"].append(statistics.mean(weight_size_noise_list))
             
             self.calculateNoise()
 
@@ -319,7 +319,7 @@ class ServerNodeClass():
         sizesfile = os.path.join(self.args.output_directory, self.args.output_directory + "_sizes.csv")
         with open(sizesfile, 'w', newline='') as file:
                 write = csv.writer(file)
-                metrics = ["weight_size_before_noise_encryption", "weight_size_after_noise_encryption", "weight_size_decryption"]
+                metrics = ["weight_size_noise_encryption", "weight_size_decryption"]
                 data_rows = zip(*[self.overhead_info[metric] for metric in metrics])
                 write.writerow(metrics)
                 write.writerows(data_rows)
