@@ -38,21 +38,21 @@ Python TenSEAL library required for CKKS file, current setup uses Python Version
 
 # Implementation
 
-You can try different `--alpha` (data distribution), `--num_users`(number of parties), `--local_ep` (number of local epochs), `--partition_sizes` (minimum size of the partitions) to see how the attack performance changes, `--pow` (allow the simulation to conduct the Proof of Work or not), `--output_directory` (the name of the directory that the results will be outputted to). For `MNIST` dataset, we set `--model=cnn`.<br>
+You can try different `--alpha` (data distribution), `--num_users`(number of parties), `--local_ep` (number of local epochs), `--partition_sizes` (minimum size of the partitions) to see how the attack performance changes, `--output_directory` (the name of the directory that the results will be outputted to). For `MNIST` dataset, we set `--model=cnn`.<br>
 
 ## For MNIST
 ```python
-python main.py --dataset=MNIST --model=cnn --alpha=1 --num_users=10 --local_ep=5 --partition_size=10 --pow=True --output_directory=MNIST_baseline
+python main.py --dataset=MNIST --model=cnn --alpha=1 --num_users=10 --local_ep=5 --partition_size=10 --output_directory=MNIST_baseline
 ```
 
 ## For CIFAR-10
 ```python
-python main.py --dataset=CIFAR10 --model=cnn --alpha=1 --num_users=10 --local_ep=5 --partition_size=10 --pow=True --output_directory=CIFAR10_baseline
+python main.py --dataset=CIFAR10 --model=cnn --alpha=1 --num_users=10 --local_ep=5 --partition_size=10 --output_directory=CIFAR10_baseline
 ```
 
 ## For SVHN
 ```python
-python main.py --dataset=SVHN --model=cnn --alpha=1 --num_users=10 --local_ep=5 --partition_size=10 --pow=True --output_directory=SVHN_baseline
+python main.py --dataset=SVHN --model=cnn --alpha=1 --num_users=10 --local_ep=5 --partition_size=10 --output_directory=SVHN_baseline
 ```
 
 # Standard FL implementation (FedAVG)

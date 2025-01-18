@@ -19,22 +19,14 @@ class NetworkSimulationClass():
         self.args = args
         self.nodes = {}
         self.server_node = None
-        self.route_volunteer = None
-        self.route_volunteer_lock = threading.Lock()
-        self.pow_volunteer = None
-        self.pow_volunteer_lock = threading.Lock()
         self.overhead_info = {
             "epoch_num": 0,
             "epoch_times": [],
             "acc_score": [],
             "loss_score": [],
             "total_time": [],
-            "pow_time": [],
-            "route_generation_time": [],
             "noise_calc_time": [],
             "training_times": [],
-            "pow_num_transmissions": [],
-            "route_generation_num_transmissions": [],
             "noise_calc_num_transmissions": [],
             "other_num_transmissions": [],
             "key_generation_time": [],
@@ -81,12 +73,8 @@ class NetworkSimulationClass():
     #checks the reason for the transmissions and increments the count the keeps track of the number of transmissions for that reason
     #purely just for collecting data. not necessary for implementation
     def checkReason(self, reason):
-        if reason == "pow":
-            self.overhead_info["pow_num_transmissions"][self.overhead_info["epoch_num"]] += 1
-        elif reason == "other":
+        if reason == "other":
             self.overhead_info["other_num_transmissions"][self.overhead_info["epoch_num"]] += 1
-        elif reason == "route":
-            self.overhead_info["route_generation_num_transmissions"][self.overhead_info["epoch_num"]] += 1
         elif reason == "noise":
             self.overhead_info["noise_calc_num_transmissions"][self.overhead_info["epoch_num"]] += 1
 
@@ -175,7 +163,6 @@ class NetworkSimulationClass():
             "train_size": len(dataset_train),
             "test_size": len(dataset_test)
         }
-        print(self.overhead_info["dataset_info"])
 
         if self.args.model == 'cnn':
             if self.args.dataset == 'MNIST':
@@ -275,21 +262,3 @@ class NetworkSimulationClass():
     
     def getNodes(self):
         return self.nodes
-    
-    def getRouteVolunteer(self):
-        return self.route_volunteer
-    
-    def getRouteVolunteerLock(self):
-        return self.route_volunteer_lock
-    
-    def setRouteVolunteer(self, volunteer):
-        self.route_volunteer = volunteer
-    
-    def getPoWVolunteer(self):
-        return self.pow_volunteer
-    
-    def getPoWVolunteerLock(self):
-        return self.pow_volunteer_lock
-    
-    def setPoWVolunteer(self, volunteer):
-        self.pow_volunteer = volunteer

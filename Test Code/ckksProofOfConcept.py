@@ -1,6 +1,7 @@
 import tenseal as ts
 import time
-import psutil
+import sys
+import numpy as np
 
 # Step 1: Create a TenSEAL context
 # Generate a CKKS context with default parameters
@@ -53,3 +54,7 @@ print(f"Key Gen: {timeGenKey}")
 print(f"Encryption: {timeEncryptData}")
 print(f"Calc on encrypted data: {timeCalCEncryptData}")
 print(f"Decryption: {timeDecryptData}")
+
+decrypted_flat = np.full(shape=20, fill_value=1111111111)
+print(sys.getsizeof(decrypted_flat))
+print(decrypted_flat.nbytes)
