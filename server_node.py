@@ -38,9 +38,7 @@ class ServerNodeClass():
         
         if "FINAL_NOISE_VALUE" in message.keys() and sender_id in self.node_list:
             self.noise_values_count += 1
-            for index, route in enumerate(self.route):
-                if sender_id in route:
-                    self.noise_values[index].append(message["FINAL_NOISE_VALUE"])        
+            self.noise_values.append(message["FINAL_NOISE_VALUE"])        
     
     # CKKS Context Setup
     def create_ckks_context(self):
@@ -106,21 +104,16 @@ class ServerNodeClass():
         noise_start_time = time.time()
         self.noise_values = []
         self.noise_values_count = 0 #keeps track of how many nodes have sent back their calculated noise
-        max_noise_count = 0 #contains the max amount of nodes that will send back their calculated noise
+        max_noise_count = len(list(self.node_list.keys()))
+        print(max_noise_count)
 
-        for route in self.route:
-            max_noise_count += len(route)
-            self.noise_values.append([])
         self.network.messageAllNodesExcludeServer(0, {"CALC_NOISE" : None}, None)
 
         #waits until it has received all the node's noise paritions sums
         while self.noise_values_count != max_noise_count :
             time.sleep(0.01)
-        
+        self.noise_added = sum(self.noise_values)
         print(f"Central server received: {self.noise_values}")
-        self.noise_added = 0
-        for noise in self.noise_values:
-            self.noise_added += statistics.mode(noise)
         print(f"Central server received: {self.noise_added }")
         self.overhead_info["noise_calc_time"].append(time.time() - noise_start_time)
 

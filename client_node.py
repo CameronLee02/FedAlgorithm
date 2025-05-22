@@ -18,9 +18,6 @@ class ClientNodeClass():
         self.received_encrypted_weights = None
         self.route = None
         self.parition_numbers = []
-        self.parition_sums = []
-        self.noise_values = []
-
 
     #This function is used to as a way to receive messages from other client nodes or the central server
     def receiveMessage(self, sender_id, message):
@@ -38,10 +35,6 @@ class ClientNodeClass():
         #NOISE_PARTITION message contains a node's share/parition of it's noise that they added to their results to protect it
         if "NOISE_PARTITION" in message.keys() and sender_id in self.node_list and sender_id in self.route:
             self.parition_numbers.append(message["NOISE_PARTITION"])
-
-        #NOISE_PARTITION_SUM message contains a node's sum of the shares it received from other nodes
-        if "NOISE_PARTITION_SUM" in message.keys() and sender_id in self.node_list and sender_id in self.route:
-            self.parition_sums.append(message["NOISE_PARTITION_SUM"])
 
     def noise_generation(self):
         noise_partitions = []
@@ -72,32 +65,12 @@ class ClientNodeClass():
             time.sleep(0.01)
         
         parition_sum = sum(self.parition_numbers)
-        self.parition_sums.append(parition_sum)
-
-        # sends the sum of the paritions they have received to all the other nodes in their route
-        threads = []
-        for node in self.route:
-            if self.node_id != node:
-                t = threading.Thread(target=self.network.messageSingleNode, args=(self.node_id, node, {"NOISE_PARTITION_SUM": parition_sum}, "noise"))
-                t.start()
-                threads.append(t)
-        
-        for t in threads:
-            t.join()
-        
-        #waits until it has received all the other nodes noise parition sums
-        while len(self.parition_sums) != len(self.route):
-            time.sleep(0.01)
-        
-        final_noise_value = sum(self.parition_sums)
 
         #send final calculated noise to central server
-        self.network.messageCentralServer(self.node_id, {"FINAL_NOISE_VALUE": final_noise_value}, "noise")
+        self.network.messageCentralServer(self.node_id, {"FINAL_NOISE_VALUE": parition_sum}, "noise")
 
         #resets all object parameters used in this procedure
         self.parition_numbers = []
-        self.parition_sums = []
-        self.noise_values = []
         self.noise_partitions = []
         
     def client_training(self, route, client_id, dataset_train, dict_party_user, net_glob, text_widget, context, overhead_info, train_time_list, 
